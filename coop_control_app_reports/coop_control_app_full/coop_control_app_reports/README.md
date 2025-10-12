@@ -1,4 +1,4 @@
-# Control Cooperativa — App completa
+# ESQUITES
 Pantallas:
 - Inventarios (artículo, unidad, precio de compra, existencia; exportar PDF/Excel).
 - Caja (ingresos/egresos, arqueo con denominaciones; exportar PDF/Excel).
