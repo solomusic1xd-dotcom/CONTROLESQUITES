@@ -24,6 +24,11 @@ jobs:
           channel: stable
           cache: true
 
+      # 🔧 Genera la estructura Android (si no existe)
+      - name: Generar estructura Android
+        working-directory: ./coop_control_app_reports
+        run: flutter create . --platforms=android
+
       - name: Dependencias
         working-directory: ./coop_control_app_reports
         run: flutter pub get
