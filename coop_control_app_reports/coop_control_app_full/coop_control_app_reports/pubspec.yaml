@@ -1,0 +1,26 @@
+name: coop_control_app
+description: Control de inventarios, caja y ventas con exportación a PDF y Excel.
+publish_to: "none"
+version: 1.1.0+2
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  shared_preferences: ^2.2.2
+  intl: ^0.19.0
+  pdf: ^3.10.8
+  printing: ^5.12.0
+  excel: ^2.1.0
+  share_plus: ^10.0.2
+  path_provider: ^2.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
