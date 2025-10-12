@@ -24,10 +24,15 @@ jobs:
           channel: stable
           cache: true
 
-      # 🔧 Genera la estructura Android (si no existe)
+      # Crea la plataforma Android dentro de la carpeta del proyecto
       - name: Generar estructura Android
         working-directory: ./coop_control_app_reports
         run: flutter create . --platforms=android
+
+      # Solo para verificar que estamos en la carpeta correcta
+      - name: Listar archivos
+        working-directory: ./coop_control_app_reports
+        run: ls -la
 
       - name: Dependencias
         working-directory: ./coop_control_app_reports
@@ -42,9 +47,3 @@ jobs:
         with:
           name: app-debug.apk
           path: coop_control_app_reports/build/app/outputs/flutter-apk/app-debug.apk
-
-      - name: Crear Release con APK
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: coop_control_app_reports/build/app/outputs/flutter-apk/app-debug.apk
