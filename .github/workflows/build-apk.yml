@@ -24,15 +24,45 @@ jobs:
           channel: stable
           cache: true
 
-      # Crea la plataforma Android dentro de la carpeta del proyecto
+      # Crea la carpeta android/ dentro de tu proyecto
       - name: Generar estructura Android
         working-directory: ./coop_control_app_reports
         run: flutter create . --platforms=android
 
-      # Solo para verificar que estamos en la carpeta correcta
-      - name: Listar archivos
-        working-directory: ./coop_control_app_reports
-        run: ls -la
+      # --- PARCHE 1: Poner Kotlin 1.8.22 en el proyecto Android ---
+      - name: Parchar versión de Kotlin a 1.8.22
+        working-directory: ./coop_control_app_reports/android
+        run: |
+          # build.gradle (formato viejo con ext.kotlin_version)
+          if grep -q "ext.kotlin_version" build.gradle; then
+            sed -i -E "s/ext\.kotlin_version\s*=\s*'[^']+'/ext.kotlin_version = '1.8.22'/" build.gradle
+          fi
+          # settings.gradle (formato nuevo con plugins DSL)
+          if grep -q "org.jetbrains.kotlin.android" settings.gradle; then
+            sed -i -E "s/id 'org.jetbrains.kotlin.android' version '([^']+)'/id 'org.jetbrains.kotlin.android' version '1.8.22'/" settings.gradle
+          fi
+
+      # --- PARCHE 2: Forzar todas las stdlib de Kotlin a 1.8.22 (evita duplicados) ---
+      - name: Forzar stdlib Kotlin 1.8.22
+        working-directory: ./coop_control_app_reports/android
+        run: |
+          if ! grep -q "resolutionStrategy" build.gradle; then
+            awk '
+              /allprojects\s*\{/ && !patched {
+                print $0;
+                print "  configurations.all {";
+                print "    resolutionStrategy {";
+                print "      force \x27org.jetbrains.kotlin:kotlin-stdlib:1.8.22\x27,";
+                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22\x27,";
+                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22\x27,";
+                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22\x27";
+                print "    }";
+                print "  }";
+                patched=1; next
+              }
+              { print $0 }
+            ' build.gradle > build.gradle.patched && mv build.gradle.patched build.gradle
+          fi
 
       - name: Dependencias
         working-directory: ./coop_control_app_reports
