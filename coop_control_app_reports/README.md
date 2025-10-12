@@ -1,0 +1,1 @@
+# Control Cooperativa — Reconstrucción mínima
