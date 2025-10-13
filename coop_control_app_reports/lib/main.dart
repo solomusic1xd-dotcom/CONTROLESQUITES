@@ -287,7 +287,38 @@ class InventoryRepo {
       );
     });
     await save(items);
-    return (true, []);
+    Future<(bool, List<String>)> aplicarReceta(
+    Map<String,double> receta, double porciones) async {
+  final items = await load();
+  final byName = { for (var i = 0; i < items.length; i++) _norm(items[i].nombre) : i };
+  final faltantes = <String>[];
+
+  receta.forEach((k, v) {
+    final need = v * porciones;
+    final idx = byName[k];
+    if (idx == null) {
+      faltantes.add('$k (no encontrado)');
+    } else if (items[idx].cantidad < need) {
+      faltantes.add('${items[idx].nombre}: falta ${(need - items[idx].cantidad).toStringAsFixed(3)}');
+    }
+  });
+
+  if (faltantes.isNotEmpty) return (false, List<String>.from(faltantes));
+
+  // descontar
+  receta.forEach((k, v) {
+    final need = v * porciones;
+    final idx = byName[k]!;
+    final it = items[idx];
+    items[idx] = InventoryItem(
+      id: it.id, nombre: it.nombre, unidad: it.unidad,
+      precioCompra: it.precioCompra, cantidad: (it.cantidad - need),
+    );
+  });
+  await save(items);
+  return (true, <String>[]);
+}
+
   }
 }
 
