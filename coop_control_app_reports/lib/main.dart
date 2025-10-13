@@ -1,16 +1,19 @@
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
 import 'package:excel/excel.dart' as ex;
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
-void main() => runApp(const CoopApp());
+/// ===== Utilidades globales =====
 
 final currency = NumberFormat.currency(locale: 'es_GT', symbol: 'Q ');
 final dateFmt = DateFormat('yyyy-MM-dd');
@@ -26,7 +29,15 @@ String _norm(String s) => s
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
-/// ===== Catálogo y Receta por porción =====
+/// Para Excel: convier­te una fila a strings simples (evita errores de tipos).
+List<dynamic> xsRow(List<dynamic> row) => row.map((e) {
+      if (e is num) return e.toString();
+      if (e is DateTime) return dateFmt.format(e);
+      return e?.toString() ?? '';
+    }).toList();
+
+/// ===== Catálogo y Receta =====
+
 const List<String> catalogoProductos = [
   'LIMON',
   'LATA DE MAIZ',
@@ -39,6 +50,7 @@ const List<String> catalogoProductos = [
   'MAYONESSA',
 ];
 
+/// Consumo por porción (misma unidad que compras).
 final Map<String, double> recetaPorcion = {
   _norm('LIMON'): 0.5,
   _norm('LATA DE MAIZ'): 0.5,
@@ -51,18 +63,14 @@ final Map<String, double> recetaPorcion = {
   _norm('MAYONESSA'): 0.0833333,
 };
 
+/// Costos estándar (por porción)
+const double COSTO_MP_STD = 15.41; // *Solo referencia; el costo real usa PEPS*
 const double COSTO_MO = 3.57;
 const double COSTO_GI = 1.67;
 
-/// ===== Resultados de aplicar receta =====
-class ApplyResult {
-  final bool ok;
-  final List<String> faltantes;
-  final double costoMP; // costo de materia prima consumida (PEPS)
-  const ApplyResult(this.ok, this.faltantes, this.costoMP);
-}
+/// ===== Arranque =====
+void main() => runApp(const CoopApp());
 
-/// ===== App =====
 class CoopApp extends StatelessWidget {
   const CoopApp({super.key});
   @override
@@ -75,44 +83,56 @@ class CoopApp extends StatelessWidget {
   }
 }
 
+/// ===== Home =====
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES')),
+      appBar:
+          AppBar(title: const Text('CONTROL ESQUITES'), centerTitle: true),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           _NavCard(
-            'Inventario (PEPS)',
-            'Resumen por producto con lotes FIFO',
-            Icons.inventory_2_outlined,
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InventoryScreen())),
+            title: 'Inventario (PEPS)',
+            subtitle:
+                'Existencias por producto. Valor al costo (lotes vigentes).',
+            icon: Icons.inventory_2_outlined,
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const InventoryScreen())),
           ),
           _NavCard(
-            'Compras',
-            'Entradas al inventario (crea lotes PEPS)',
-            Icons.shopping_cart_outlined,
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchaseScreen())),
+            title: 'Compras',
+            subtitle: 'Ingresar lotes (fecha, cantidad, precio).',
+            icon: Icons.shopping_cart_outlined,
+            onTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const PurchaseScreen())),
           ),
           _NavCard(
-            'Ventas',
-            'Registra porciones (descuenta PEPS)',
-            Icons.point_of_sale_outlined,
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SalesScreen())),
+            title: 'Ventas',
+            subtitle:
+                'Registra porciones vendidas. Aplica receta y descuenta PEPS.',
+            icon: Icons.point_of_sale_outlined,
+            onTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const SalesScreen())),
           ),
           _NavCard(
-            'Caja',
-            'Ingresos/Egresos y Arqueo',
-            Icons.account_balance_wallet,
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CashScreen())),
+            title: 'Caja',
+            subtitle: 'Movimientos y arqueo con denominaciones.',
+            icon: Icons.calculate_outlined,
+            onTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const CashScreen())),
           ),
           _NavCard(
-            'Reporte de Costos',
-            'MP(PEPS)+MO+GI y Ganancia neta',
-            Icons.bar_chart,
-            () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CostReportScreen())),
+            title: 'Reporte de Costos',
+            subtitle:
+                'Ingresos, costos (MP PEPS, MO, GI) y ganancia por rango.',
+            icon: Icons.bar_chart_outlined,
+            onTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const CostReportScreen())),
           ),
         ],
       ),
@@ -121,19 +141,24 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _NavCard extends StatelessWidget {
-  final String t, s;
+  final String title, subtitle;
   final IconData icon;
   final VoidCallback onTap;
-  const _NavCard(this.t, this.s, this.icon, this.onTap, {super.key});
+  const _NavCard(
+      {required this.title,
+      required this.subtitle,
+      required this.icon,
+      required this.onTap,
+      super.key});
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ListTile(
         leading: Icon(icon, size: 32),
-        title: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(s),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
       ),
@@ -141,171 +166,27 @@ class _NavCard extends StatelessWidget {
   }
 }
 
-/// =====================
-///   MODELOS + REPOS
-/// =====================
+/// ===== Datos: Compras (lotes) - base PEPS =====
 
-/// Lote PEPS
-class InventoryLot {
-  final String id; // id compra
-  final String fecha;
-  final String producto;
-  final String unidad;
-  final double precioUnit;
-  final double qty;
-
-  const InventoryLot({
-    required this.id,
-    required this.fecha,
-    required this.producto,
-    required this.unidad,
-    required this.precioUnit,
-    required this.qty,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'fecha': fecha,
-        'producto': producto,
-        'unidad': unidad,
-        'precioUnit': precioUnit,
-        'qty': qty,
-      };
-
-  factory InventoryLot.fromJson(Map<String, dynamic> j) => InventoryLot(
-        id: j['id'],
-        fecha: j['fecha'],
-        producto: j['producto'],
-        unidad: j['unidad'] ?? 'unidad',
-        precioUnit: (j['precioUnit'] as num).toDouble(),
-        qty: (j['qty'] as num).toDouble(),
-      );
-}
-
-class InvResumen {
-  final String producto, unidad;
-  final double cantidad, valor, precioPromedio;
-  const InvResumen(this.producto, this.unidad, this.cantidad, this.valor, this.precioPromedio);
-}
-
-class InventoryRepo {
-  static const _lotsKey = 'inv_lots_v1';
-
-  Future<List<InventoryLot>> _loadLots() async {
-    final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_lotsKey);
-    if (raw == null || raw.isEmpty) return [];
-    final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
-    return list.map(InventoryLot.fromJson).toList();
-  }
-
-  Future<void> _saveLots(List<InventoryLot> lots) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_lotsKey, jsonEncode(lots.map((e) => e.toJson()).toList()));
-  }
-
-  Future<void> entradaCompra({
-    required String idCompra,
-    required String fecha,
-    required String producto,
-    required String unidad,
-    required double unidades,
-    required double precioUnitario,
-  }) async {
-    final lots = await _loadLots();
-    lots.add(InventoryLot(
-      id: idCompra,
-      fecha: fecha,
-      producto: producto,
-      unidad: unidad,
-      precioUnit: precioUnitario,
-      qty: unidades,
-    ));
-    await _saveLots(lots);
-  }
-
-  Future<List<InvResumen>> resumen() async {
-    final lots = await _loadLots();
-    final Map<String, List<InventoryLot>> byProd = {};
-    for (final l in lots) {
-      byProd.putIfAbsent(_norm(l.producto), () => []).add(l);
-    }
-    final out = <InvResumen>[];
-    byProd.forEach((_, ls) {
-      final nombre = ls.first.producto;
-      final unidad = ls.first.unidad;
-      final cant = ls.fold<double>(0, (p, l) => p + l.qty);
-      final val = ls.fold<double>(0, (p, l) => p + l.qty * l.precioUnit);
-      final prom = cant > 0 ? val / cant : 0;
-      out.add(InvResumen(nombre, unidad, cant, val, prom));
-    });
-    out.sort((a, b) => a.producto.compareTo(b.producto));
-    return out;
-  }
-
-  /// Consumir receta por PEPS; devuelve costo MP usado.
-  Future<ApplyResult> consumirRecetaFIFO(Map<String, double> receta, double porciones) async {
-    final lots = await _loadLots();
-
-    // Verificar faltantes
-    final need = {for (final e in receta.entries) e.key: e.value * porciones};
-    final faltantes = <String>[];
-    for (final e in need.entries) {
-      final disp = lots.where((l) => _norm(l.producto) == e.key).fold<double>(0, (p, l) => p + l.qty);
-      if (disp + 1e-9 < e.value) {
-        faltantes.add('${e.key.toUpperCase()}: falta ${(e.value - disp).toStringAsFixed(3)}');
-      }
-    }
-    if (faltantes.isNotEmpty) return ApplyResult(false, faltantes, 0);
-
-    // Descontar FIFO
-    double costoMP = 0;
-    for (final e in need.entries) {
-      double req = e.value;
-      final fifo = lots.where((l) => _norm(l.producto) == e.key).toList()
-        ..sort((a, b) => a.fecha.compareTo(b.fecha));
-      for (final l in fifo) {
-        if (req <= 0) break;
-        final take = req <= l.qty ? req : l.qty;
-        costoMP += take * l.precioUnit;
-        final idx = lots.indexWhere((x) => x.id == l.id);
-        lots[idx] = InventoryLot(
-          id: l.id, fecha: l.fecha, producto: l.producto, unidad: l.unidad,
-          precioUnit: l.precioUnit, qty: l.qty - take,
-        );
-        req -= take;
-      }
-    }
-    await _saveLots(lots);
-    return ApplyResult(true, const [], costoMP);
-  }
-
-  Future<void> eliminarLotePorId(String lotId) async {
-    final lots = await _loadLots();
-    lots.removeWhere((l) => l.id == lotId);
-    await _saveLots(lots);
-  }
-
-  Future<double?> qtyDeLote(String lotId) async {
-    final lots = await _loadLots();
-    final f = lots.where((e) => e.id == lotId).toList();
-    if (f.isEmpty) return null;
-    return f.first.qty;
-  }
-}
-
-/// Compra
 class Purchase {
-  final String id, fecha, producto, unidad;
-  final double unidades, precioUnit;
-  const Purchase({
+  final String id;
+  final String fecha; // yyyy-MM-dd
+  final String producto; // del catálogo
+  final String unidad; // texto libre (ej. gr, ml, unidad)
+  final double unidades; // cantidad comprada
+  final double precioUnit; // costo por unidad
+  double restante; // saldo pendiente (para PEPS)
+
+  Purchase({
     required this.id,
     required this.fecha,
     required this.producto,
     required this.unidad,
     required this.unidades,
     required this.precioUnit,
+    required this.restante,
   });
+
   double get total => unidades * precioUnit;
 
   Map<String, dynamic> toJson() => {
@@ -315,7 +196,9 @@ class Purchase {
         'unidad': unidad,
         'unidades': unidades,
         'precioUnit': precioUnit,
+        'restante': restante,
       };
+
   factory Purchase.fromJson(Map<String, dynamic> j) => Purchase(
         id: j['id'],
         fecha: j['fecha'],
@@ -323,11 +206,13 @@ class Purchase {
         unidad: j['unidad'] ?? 'unidad',
         unidades: (j['unidades'] as num).toDouble(),
         precioUnit: (j['precioUnit'] as num).toDouble(),
+        restante: (j['restante'] as num).toDouble(),
       );
 }
 
 class PurchaseRepo {
   static const _key = 'compras_v2';
+
   Future<List<Purchase>> load() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
@@ -338,48 +223,139 @@ class PurchaseRepo {
 
   Future<void> save(List<Purchase> xs) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_key, jsonEncode(xs.map((e) => e.toJson()).toList()));
+    await p.setString(
+        _key, jsonEncode(xs.map((e) => e.toJson()).toList()));
+  }
+
+  /// Existencia total por producto (suma de "restante" en los lotes).
+  Future<double> stockOf(String producto) async {
+    final xs = await load();
+    final n = _norm(producto);
+    return xs
+        .where((e) => _norm(e.producto) == n)
+        .fold<double>(0, (p, e) => p + e.restante);
+  }
+
+  /// Costo y descuento de lotes según PEPS (devuelve costoMP).
+  Future<PEPSResult> consumirPEPS(
+      {required Map<String, double> receta,
+      required double porciones}) async {
+    final xs = await load();
+
+    // 1) Validar faltantes
+    final falt = <String>[];
+    receta.forEach((prodN, porUnidad) {
+      final need = (porUnidad * porciones);
+      final disp = xs
+          .where((e) => _norm(e.producto) == prodN)
+          .fold<double>(0, (p, e) => p + e.restante);
+      if (disp + 1e-9 < need) {
+        falt.add('$prodN: falta ${(need - disp).toStringAsFixed(3)}');
+      }
+    });
+    if (falt.isNotEmpty) {
+      return PEPSResult(false, falt, 0.0);
+    }
+
+    // 2) Consumir PEPS
+    double costo = 0.0;
+    for (final entry in receta.entries) {
+      final prodN = entry.key;
+      double need = entry.value * porciones;
+
+      // lotes por fecha (ascendente)
+      final lots = xs
+          .where((e) => _norm(e.producto) == prodN && e.restante > 0)
+          .toList()
+        ..sort((a, b) {
+          final cmp = a.fecha.compareTo(b.fecha);
+          if (cmp != 0) return cmp;
+          return a.id.compareTo(b.id);
+        });
+
+      for (final lot in lots) {
+        if (need <= 0) break;
+        final take = need <= lot.restante ? need : lot.restante;
+        costo += take * lot.precioUnit;
+        lot.restante = (lot.restante - take);
+        need -= take;
+      }
+    }
+
+    await save(xs);
+    return PEPSResult(true, const [], costo);
   }
 }
 
-/// Venta (guardamos costo MP PEPS calculado)
+class PEPSResult {
+  final bool ok;
+  final List<String> faltantes;
+  final double costoMP;
+  PEPSResult(this.ok, this.faltantes, this.costoMP);
+}
+
+/// ===== Datos: Ventas =====
+
 class Sale {
-  final String id, fecha, nota;
-  final double porciones, precioUnit, costoMP;
-  const Sale({
+  final String id;
+  final String fecha; // yyyy-MM-dd
+  final double porciones;
+  final double precioUnit;
+
+  // calculados y guardados
+  final double ingreso;
+  final double costoMP;
+  final double costoMO;
+  final double costoGI;
+  final double costoTotal;
+  final double ganancia;
+  final String nota;
+
+  Sale({
     required this.id,
     required this.fecha,
     required this.porciones,
     required this.precioUnit,
+    required this.ingreso,
     required this.costoMP,
+    required this.costoMO,
+    required this.costoGI,
+    required this.costoTotal,
+    required this.ganancia,
     required this.nota,
   });
-  double get ingreso => porciones * precioUnit;
-  double get costoMO => porciones * COSTO_MO;
-  double get costoGI => porciones * COSTO_GI;
-  double get costoTotal => costoMP + costoMO + costoGI;
-  double get ganancia => ingreso - costoTotal;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'fecha': fecha,
         'porciones': porciones,
         'precioUnit': precioUnit,
+        'ingreso': ingreso,
         'costoMP': costoMP,
+        'costoMO': costoMO,
+        'costoGI': costoGI,
+        'costoTotal': costoTotal,
+        'ganancia': ganancia,
         'nota': nota,
       };
+
   factory Sale.fromJson(Map<String, dynamic> j) => Sale(
         id: j['id'],
         fecha: j['fecha'],
         porciones: (j['porciones'] as num).toDouble(),
         precioUnit: (j['precioUnit'] as num).toDouble(),
-        costoMP: (j['costoMP'] as num?)?.toDouble() ?? 0.0,
+        ingreso: (j['ingreso'] as num).toDouble(),
+        costoMP: (j['costoMP'] as num).toDouble(),
+        costoMO: (j['costoMO'] as num).toDouble(),
+        costoGI: (j['costoGI'] as num).toDouble(),
+        costoTotal: (j['costoTotal'] as num).toDouble(),
+        ganancia: (j['ganancia'] as num).toDouble(),
         nota: j['nota'] ?? '',
       );
 }
 
 class SalesRepo {
-  static const _key = 'ventas_v3';
+  static const _key = 'ventas_v2';
   Future<List<Sale>> load() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_key);
@@ -388,578 +364,1288 @@ class SalesRepo {
     return list.map(Sale.fromJson).toList();
   }
 
-  Future<void> save(List<Sale> sales) async {
+  Future<void> save(List<Sale> xs) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_key, jsonEncode(sales.map((e) => e.toJson()).toList()));
+    await p.setString(_key, jsonEncode(xs.map((e) => e.toJson()).toList()));
   }
 }
 
-/// Caja
+/// ===== Datos: Caja =====
+
 class CashMove {
-  final String id, fecha, tipo, concepto;
+  final String id;
+  final String fecha;
+  final String tipo; // Ingreso / Egreso
+  final String concepto;
   final double monto;
-  const CashMove({required this.id, required this.fecha, required this.tipo, required this.concepto, required this.monto});
-  Map<String, dynamic> toJson()=>{'id':id,'fecha':fecha,'tipo':tipo,'concepto':concepto,'monto':monto};
-  factory CashMove.fromJson(Map<String,dynamic> j)=>CashMove(id:j['id'],fecha:j['fecha'],tipo:j['tipo'],concepto:j['concepto'],monto:(j['monto'] as num).toDouble());
+  CashMove(
+      {required this.id,
+      required this.fecha,
+      required this.tipo,
+      required this.concepto,
+      required this.monto});
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'fecha': fecha, 'tipo': tipo, 'concepto': concepto, 'monto': monto};
+  factory CashMove.fromJson(Map<String, dynamic> j) => CashMove(
+      id: j['id'],
+      fecha: j['fecha'],
+      tipo: j['tipo'],
+      concepto: j['concepto'],
+      monto: (j['monto'] as num).toDouble());
 }
+
 class CashCount {
-  final String id, fecha; final Map<String,int> denom;
-  const CashCount({required this.id, required this.fecha, required this.denom});
-  double get total => 200*(denom['200']??0)+100*(denom['100']??0)+50*(denom['50']??0)+20*(denom['20']??0)+10*(denom['10']??0)+5*(denom['5']??0)+1*(denom['1']??0)+0.50*(denom['0.50']??0)+0.25*(denom['0.25']??0);
-  Map<String,dynamic> toJson()=>{'id':id,'fecha':fecha,'denom':denom};
-  factory CashCount.fromJson(Map<String,dynamic> j)=>CashCount(id:j['id'],fecha:j['fecha'],denom:(j['denom'] as Map).map((k,v)=>MapEntry(k.toString(), (v as num).toInt())));
+  final String id;
+  final String fecha;
+  final Map<String, int> denom; // '200','100',...,'0.25'
+  CashCount({required this.id, required this.fecha, required this.denom});
+  double get total =>
+      200 * (denom['200'] ?? 0) +
+      100 * (denom['100'] ?? 0) +
+      50 * (denom['50'] ?? 0) +
+      20 * (denom['20'] ?? 0) +
+      10 * (denom['10'] ?? 0) +
+      5 * (denom['5'] ?? 0) +
+      1 * (denom['1'] ?? 0) +
+      0.50 * (denom['0.50'] ?? 0) +
+      0.25 * (denom['0.25'] ?? 0);
+
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'fecha': fecha, 'denom': denom};
+  factory CashCount.fromJson(Map<String, dynamic> j) => CashCount(
+      id: j['id'],
+      fecha: j['fecha'],
+      denom: (j['denom'] as Map)
+          .map((k, v) => MapEntry(k.toString(), (v as num).toInt())));
 }
+
 class CashRepo {
-  static const _mk='caja_movs_v1', _ck='caja_counts_v1';
-  Future<List<CashMove>> loadMoves() async { final p=await SharedPreferences.getInstance(); final raw=p.getString(_mk); if(raw==null||raw.isEmpty)return[]; final list=(jsonDecode(raw) as List).cast<Map<String,dynamic>>(); return list.map(CashMove.fromJson).toList();}
-  Future<void> saveMoves(List<CashMove> m) async { final p=await SharedPreferences.getInstance(); await p.setString(_mk, jsonEncode(m.map((e)=>e.toJson()).toList())); }
-  Future<List<CashCount>> loadCounts() async { final p=await SharedPreferences.getInstance(); final raw=p.getString(_ck); if(raw==null||raw.isEmpty)return[]; final list=(jsonDecode(raw) as List).cast<Map<String,dynamic>>(); return list.map(CashCount.fromJson).toList();}
-  Future<void> saveCounts(List<CashCount> c) async { final p=await SharedPreferences.getInstance(); await p.setString(_ck, jsonEncode(c.map((e)=>e.toJson()).toList())); }
+  static const _mk = 'caja_movs_v2', _ck = 'caja_counts_v2';
+
+  Future<List<CashMove>> loadMoves() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_mk);
+    if (raw == null || raw.isEmpty) return [];
+    final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return list.map(CashMove.fromJson).toList();
+  }
+
+  Future<void> saveMoves(List<CashMove> xs) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_mk, jsonEncode(xs.map((e) => e.toJson()).toList()));
+  }
+
+  Future<List<CashCount>> loadCounts() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_ck);
+    if (raw == null || raw.isEmpty) return [];
+    final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return list.map(CashCount.fromJson).toList();
+  }
+
+  Future<void> saveCounts(List<CashCount> xs) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_ck, jsonEncode(xs.map((e) => e.toJson()).toList()));
+  }
 }
 
-/// =====================
-///     INVENTARIO
-/// =====================
+/// ===== Pantalla: Compras =====
 
-class InventoryScreen extends StatefulWidget { const InventoryScreen({super.key}); @override State<InventoryScreen> createState()=>_InventoryScreenState(); }
-class _InventoryScreenState extends State<InventoryScreen> {
-  final inv = InventoryRepo(); List<InvResumen> data=[];
-  @override void initState(){ super.initState(); _load(); }
-  Future<void> _load() async { data = await inv.resumen(); setState((){}); }
+class PurchaseScreen extends StatefulWidget {
+  const PurchaseScreen({super.key});
+  @override
+  State<PurchaseScreen> createState() => _PurchaseScreenState();
+}
+
+class _PurchaseScreenState extends State<PurchaseScreen> {
+  final repo = PurchaseRepo();
+  List<Purchase> lots = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    lots = await repo.load();
+    lots.sort((a, b) {
+      final c = b.fecha.compareTo(a.fecha);
+      return c != 0 ? c : b.id.compareTo(a.id);
+    });
+    setState(() {});
+  }
+
+  Future<void> _add() async {
+    final res = await showDialog<Purchase>(
+        context: context, builder: (_) => const _PurchaseDialog());
+    if (res != null) {
+      lots.add(res);
+      await repo.save(lots);
+      _load();
+    }
+  }
+
+  Future<void> _delete(Purchase p) async {
+    if (p.restante < p.unidades - 1e-9) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No se puede borrar: el lote ya tiene consumo.')));
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Eliminar lote'),
+        content:
+            const Text('¿Eliminar definitivamente este registro de compra?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+        ],
+      ),
+    );
+    if (ok ?? false) {
+      lots.removeWhere((e) => e.id == p.id);
+      await repo.save(lots);
+      _load();
+    }
+  }
 
   Future<void> _exportPdf() async {
     final pdf = pw.Document();
-    final headers = ['Producto','Unidad','Existencia','P.Promedio','Valor'];
-    final rows = data.map((r)=>[r.producto,r.unidad,r.cantidad.toStringAsFixed(2),currency.format(r.precioPromedio),currency.format(r.valor)]).toList();
-    final total = data.fold<double>(0,(p,r)=>p+r.valor);
-    pdf.addPage(pw.MultiPage(build: (_)=>[
-      pw.Header(level:0, child: pw.Text('Inventario (PEPS)', style: pw.TextStyle(fontSize:20))),
-      pw.Text('Fecha: ${dateFmt.format(DateTime.now())}'),
-      pw.SizedBox(height:8),
-      pw.Table.fromTextArray(headers: headers, data: rows),
-      pw.SizedBox(height:8),
-      pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Valor total: ${currency.format(total)}')),
-    ]));
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'inventario_peps.pdf');
+    final headers = [
+      'Fecha',
+      'Producto',
+      'Unidad',
+      'Unidades',
+      'Restante',
+      'P.Unit',
+      'Total'
+    ];
+    final data = lots
+        .map((e) => [
+              e.fecha,
+              e.producto,
+              e.unidad,
+              e.unidades.toStringAsFixed(3),
+              e.restante.toStringAsFixed(3),
+              currency.format(e.precioUnit),
+              currency.format(e.total)
+            ])
+        .toList();
+    final sum = lots.fold<double>(0, (p, e) => p + e.total);
+    pdf.addPage(pw.MultiPage(build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Compras', style: pw.TextStyle(fontSize: 20))),
+          pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(headers: headers, data: data),
+          pw.SizedBox(height: 8),
+          pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text('Total: ${currency.format(sum)}')),
+        ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'compras.pdf');
   }
 
-  // Convierte cualquier lista en Strings para Excel (evita errores de tipos).
-  List<dynamic> _xs(List<dynamic> row) => row.map((e){
-    if (e is num) return e.toString();
-    return e?.toString() ?? '';
-  }).toList();
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final sh = excel['Compras'];
+    sh.appendRow(xsRow(['Fecha', 'Producto', 'Unidad', 'Unidades', 'Restante', 'P.Unit', 'Total']));
+    for (final e in lots) {
+      sh.appendRow(xsRow([
+        e.fecha,
+        e.producto,
+        e.unidad,
+        e.unidades,
+        e.restante,
+        e.precioUnit,
+        e.total
+      ]));
+    }
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/compras.xlsx';
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles([XFile(path)]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Compras'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'pdf') _exportPdf();
+              if (v == 'xlsx') _exportExcel();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
+              PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
+            ],
+          )
+        ],
+      ),
+      floatingActionButton:
+          FloatingActionButton.extended(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Compra')),
+      body: lots.isEmpty
+          ? const Center(child: Text('Sin compras'))
+          : ListView.separated(
+              itemCount: lots.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (_, i) {
+                final e = lots[i];
+                return ListTile(
+                  title: Text('${e.producto} · ${currency.format(e.precioUnit)}'),
+                  subtitle: Text('${e.fecha}  ·  ${e.unidad}\n'
+                      'Comprado: ${e.unidades.toStringAsFixed(3)}  ·  Restante: ${e.restante.toStringAsFixed(3)}'),
+                  isThreeLine: true,
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => _delete(e),
+                  ),
+                );
+              }),
+    );
+  }
+}
+
+class _PurchaseDialog extends StatefulWidget {
+  const _PurchaseDialog();
+  @override
+  State<_PurchaseDialog> createState() => _PurchaseDialogState();
+}
+
+class _PurchaseDialogState extends State<_PurchaseDialog> {
+  String prod = catalogoProductos.first;
+  final unidad = TextEditingController(text: 'unidad');
+  final unidades = TextEditingController();
+  final precio = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final hoy = dateFmt.format(DateTime.now());
+    return AlertDialog(
+      title: const Text('Nueva compra (lote)'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(enabled: false, decoration: InputDecoration(labelText: 'Fecha', hintText: hoy)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: prod,
+            items: catalogoProductos
+                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                .toList(),
+            onChanged: (v) => setState(() => prod = v ?? prod),
+            decoration: const InputDecoration(labelText: 'Producto'),
+          ),
+          const SizedBox(height: 8),
+          TextField(controller: unidad, decoration: const InputDecoration(labelText: 'Unidad (gr, ml, unidad...)')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: unidades,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Unidades')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: precio,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Precio por unidad')),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () {
+              final u = double.tryParse(unidades.text.replaceAll(',', '.')) ?? 0.0;
+              final p = double.tryParse(precio.text.replaceAll(',', '.')) ?? 0.0;
+              final lot = Purchase(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                fecha: hoy,
+                producto: prod,
+                unidad: unidad.text.trim().isEmpty ? 'unidad' : unidad.text.trim(),
+                unidades: u,
+                precioUnit: p,
+                restante: u,
+              );
+              Navigator.pop(context, lot);
+            },
+            child: const Text('Guardar')),
+      ],
+    );
+  }
+}
+
+/// ===== Pantalla: Inventario (agregado por producto desde lotes) =====
+
+class InventoryRow {
+  final String producto;
+  final String unidad;
+  final double cantidad;
+  final double precioPromedio; // ponderado por restante
+  final double valor;
+
+  InventoryRow(
+      {required this.producto,
+      required this.unidad,
+      required this.cantidad,
+      required this.precioPromedio,
+      required this.valor});
+}
+
+class InventoryScreen extends StatefulWidget {
+  const InventoryScreen({super.key});
+  @override
+  State<InventoryScreen> createState() => _InventoryScreenState();
+}
+
+class _InventoryScreenState extends State<InventoryScreen> {
+  final repo = PurchaseRepo();
+  List<InventoryRow> rows = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuild();
+  }
+
+  Future<void> _rebuild() async {
+    final lots = await repo.load();
+    final Map<String, List<Purchase>> by = {};
+    for (final l in lots) {
+      by.putIfAbsent(_norm(l.producto), () => []).add(l);
+    }
+
+    final out = <InventoryRow>[];
+    for (final entry in by.entries) {
+      final prodN = entry.key;
+      final items = entry.value;
+      final nombreReal = items.last.producto; // cualquiera
+      final unidad = items.last.unidad;
+      final total = items.fold<double>(0, (p, e) => p + e.restante);
+      if (total <= 0) continue;
+      final valor = items.fold<double>(0, (p, e) => p + e.restante * e.precioUnit);
+      final prom = valor / total;
+      out.add(InventoryRow(
+          producto: nombreReal,
+          unidad: unidad,
+          cantidad: total,
+          precioPromedio: prom,
+          valor: valor));
+    }
+    out.sort((a, b) => a.producto.compareTo(b.producto));
+    rows = out;
+    setState(() {});
+  }
+
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final headers = ['Producto', 'Unidad', 'Existencia', 'P.Prom', 'Valor'];
+    final data = rows
+        .map((r) => [
+              r.producto,
+              r.unidad,
+              r.cantidad.toStringAsFixed(3),
+              currency.format(r.precioPromedio),
+              currency.format(r.valor)
+            ])
+        .toList();
+    final sum = rows.fold<double>(0, (p, e) => p + e.valor);
+    pdf.addPage(pw.MultiPage(build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Inventario (PEPS)', style: pw.TextStyle(fontSize: 20))),
+          pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(headers: headers, data: data),
+          pw.SizedBox(height: 8),
+          pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text('Valor total: ${currency.format(sum)}')),
+        ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'inventario.pdf');
+  }
 
   Future<void> _exportExcel() async {
     final excel = ex.Excel.createExcel();
     final sh = excel['Inventario'];
-    sh.appendRow(_xs(['Producto','Unidad','Existencia','P.Promedio','Valor']));
-    for(final r in data){
-      sh.appendRow(_xs([r.producto,r.unidad,r.cantidad,r.precioPromedio,r.valor]));
+    sh.appendRow(xsRow(['Producto', 'Unidad', 'Existencia', 'P.Prom', 'Valor']));
+    for (final r in rows) {
+      sh.appendRow(xsRow([r.producto, r.unidad, r.cantidad, r.precioPromedio, r.valor]));
     }
     final bytes = excel.encode()!;
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/inventario_peps.xlsx';
-    await File(path).writeAsBytes(bytes, flush:true);
+    final path = '${dir.path}/inventario.xlsx';
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
     await Share.shareXFiles([XFile(path)]);
   }
 
   @override
-  Widget build(BuildContext context){
-    final total = data.fold<double>(0,(p,r)=>p+r.valor);
+  Widget build(BuildContext context) {
+    final sum = rows.fold<double>(0, (p, e) => p + e.valor);
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Inventario (PEPS)'), actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
-        PopupMenuButton<String>(onSelected:(v){ if(v=='pdf')_exportPdf(); if(v=='xlsx')_exportExcel(); }, itemBuilder:(_)=>const [
-          PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
-          PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
-        ])
-      ]),
-      body: data.isEmpty? const Center(child: Text('Sin existencias')) :
-        ListView.separated(itemCount: data.length, separatorBuilder: (_,__)=>
-          const Divider(height:1), itemBuilder: (_ ,i){
-            final r=data[i];
-            return ListTile(
-              title: Text(r.producto),
-              subtitle: Text('Unidad: ${r.unidad} · P.Promedio: ${currency.format(r.precioPromedio)}'),
-              trailing: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisAlignment: MainAxisAlignment.center, children:[
-                Text('Existencia: ${r.cantidad.toStringAsFixed(2)}'),
-                Text(currency.format(r.valor)),
-              ]),
-            );
-          }),
-      bottomNavigationBar: Padding(padding: const EdgeInsets.all(12), child: Text('Valor total: ${currency.format(total)}', textAlign: TextAlign.right)),
-    );
-  }
-}
-
-/// =====================
-///       COMPRAS
-/// =====================
-
-class PurchaseScreen extends StatefulWidget { const PurchaseScreen({super.key}); @override State<PurchaseScreen> createState()=>_PurchaseScreenState(); }
-class _PurchaseScreenState extends State<PurchaseScreen> {
-  final pRepo = PurchaseRepo(); final inv = InventoryRepo(); final cash = CashRepo();
-  String producto = catalogoProductos.first; String unidad='unidad';
-  final unidadesCtrl=TextEditingController(); final precioCtrl=TextEditingController();
-  List<Purchase> compras=[];
-
-  @override void initState(){ super.initState(); _load(); }
-  Future<void> _load() async { compras=await pRepo.load(); setState((){}); }
-
-  Future<void> _add() async {
-    final hoy = dateFmt.format(DateTime.now());
-    final u = double.tryParse(unidadesCtrl.text.replaceAll(',', '.')) ?? 0;
-    final pu = double.tryParse(precioCtrl.text.replaceAll(',', '.')) ?? 0;
-    if (u<=0 || pu<=0) return;
-    final id = DateTime.now().millisecondsSinceEpoch.toString();
-    final c = Purchase(id:id, fecha:hoy, producto:producto, unidad:unidad, unidades:u, precioUnit:pu);
-    compras.add(c); await pRepo.save(compras);
-    await inv.entradaCompra(idCompra:id, fecha:hoy, producto:producto, unidad:unidad, unidades:u, precioUnitario:pu);
-    final mv = CashMove(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: hoy, tipo:'Egreso', concepto:'Compra $producto', monto:c.total);
-    final movs = await cash.loadMoves()..add(mv); await cash.saveMoves(movs);
-    unidadesCtrl.clear(); precioCtrl.clear(); setState((){});
-  }
-
-  Future<void> _delete(Purchase c) async {
-    final qtyLote = await inv.qtyDeLote(c.id);
-    if (qtyLote == null) return;
-    if ((qtyLote - c.unidades).abs() > 1e-9) {
-      showDialog(context: context, builder: (_)=>const AlertDialog(title: Text('No se puede borrar'), content: Text('Ese lote ya se utilizó en ventas.')));
-      return;
-    }
-    await inv.eliminarLotePorId(c.id);
-    compras.removeWhere((x)=>x.id==c.id);
-    await pRepo.save(compras);
-    final mv = CashMove(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: dateFmt.format(DateTime.now()), tipo:'Ingreso', concepto:'Anulación compra ${c.producto}', monto:c.total);
-    final movs = await cash.loadMoves()..add(mv); await cash.saveMoves(movs);
-    setState((){});
-  }
-
-  double get total => compras.fold<double>(0,(p,c)=>p+c.total);
-
-  Future<void> _exportPdf() async {
-    final pdf = pw.Document();
-    final headers=['Fecha','Producto','Unidad','Unidades','P.Unit','Total'];
-    final rows = compras.map((c)=>[c.fecha,c.producto,c.unidad,c.unidades.toStringAsFixed(3),currency.format(c.precioUnit),currency.format(c.total)]).toList();
-    pdf.addPage(pw.MultiPage(build: (_)=>[
-      pw.Header(level:0, child: pw.Text('Compras', style: pw.TextStyle(fontSize:20))),
-      pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
-      pw.SizedBox(height:8),
-      pw.Table.fromTextArray(headers: headers, data: rows),
-      pw.SizedBox(height:8),
-      pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Total: ${currency.format(total)}')),
-    ]));
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'compras.pdf');
-  }
-
-  List<dynamic> _xs(List<dynamic> row) => row.map((e)=> (e is num)? e.toString() : (e?.toString() ?? '')).toList();
-  Future<void> _exportExcel() async {
-    final excel = ex.Excel.createExcel(); final sh=excel['Compras'];
-    sh.appendRow(_xs(['Fecha','Producto','Unidad','Unidades','P.Unit','Total']));
-    for(final c in compras){ sh.appendRow(_xs([c.fecha,c.producto,c.unidad,c.unidades,c.precioUnit,c.total])); }
-    final bytes=excel.encode()!; final dir=await getTemporaryDirectory(); final path='${dir.path}/compras.xlsx'; await File(path).writeAsBytes(bytes, flush:true); await Share.shareXFiles([XFile(path)]);
-  }
-
-  @override
-  Widget build(BuildContext context){
-    return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Compras'), actions:[
-        PopupMenuButton<String>(onSelected:(v){ if(v=='pdf')_exportPdf(); if(v=='xlsx')_exportExcel(); }, itemBuilder:(_)=>const [
-          PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
-          PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
-        ])
-      ]),
-      body: Column(children:[
-        Padding(padding: const EdgeInsets.all(12), child: Wrap(runSpacing:8, spacing:8, children:[
-          SizedBox(width:220, child: DropdownButtonFormField<String>(value:producto, items: catalogoProductos.map((p)=>DropdownMenuItem(value:p, child: Text(p))).toList(), onChanged:(v)=>setState(()=>producto=v??producto), decoration: const InputDecoration(labelText:'Producto'))),
-          SizedBox(width:140, child: TextField(controller:unidadesCtrl, keyboardType: const TextInputType.numberWithOptions(decimal:true), decoration: const InputDecoration(labelText:'Unidades'))),
-          SizedBox(width:140, child: TextField(controller:precioCtrl, keyboardType: const TextInputType.numberWithOptions(decimal:true), decoration: const InputDecoration(labelText:'Precio unitario'))),
-          SizedBox(width:140, child: TextField(controller: TextEditingController(text:unidad), decoration: const InputDecoration(labelText:'Unidad'), onChanged:(v)=>unidad=v)),
-          FilledButton(onPressed:_add, child: const Text('Agregar')),
-        ])),
-        Padding(padding: const EdgeInsets.symmetric(horizontal:12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[
-          Text('Fecha: ${dateFmt.format(DateTime.now())}'),
-          Text('Total: ${currency.format(total)}'),
-        ])),
-        const Divider(),
-        Expanded(child: compras.isEmpty? const Center(child: Text('Sin compras')) :
-          ListView.separated(itemCount: compras.length, separatorBuilder: (_,__)=>
-            const Divider(height:1), itemBuilder: (_ ,i){
-              final c=compras[compras.length-1-i];
-              return ListTile(
-                title: Text('${c.producto} · ${c.unidades} ${c.unidad}'),
-                subtitle: Text('Fecha: ${c.fecha} · P.Unit: ${currency.format(c.precioUnit)}'),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children:[
-                  Text(currency.format(c.total)),
-                  IconButton(icon: const Icon(Icons.delete_outline), tooltip:'Borrar compra (si lote no se usó)', onPressed: ()=>_delete(c)),
-                ]),
-              );
-            })
+      appBar: AppBar(
+        title: const Text('Inventario (PEPS)'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'pdf') _exportPdf();
+              if (v == 'xlsx') _exportExcel();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
+              PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
+            ],
+          )
+        ],
+      ),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Productos: ${rows.length}'),
+              Text('Valor total: ${currency.format(sum)}'),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: rows.isEmpty
+              ? const Center(child: Text('No hay existencias'))
+              : RefreshIndicator(
+                  onRefresh: _rebuild,
+                  child: ListView.separated(
+                    itemCount: rows.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final r = rows[i];
+                      return ListTile(
+                        title: Text(r.producto),
+                        subtitle: Text('Unidad: ${r.unidad} · P.Prom: ${currency.format(r.precioPromedio)}'),
+                        trailing: Text(
+                            'Exist.: ${r.cantidad.toStringAsFixed(3)}\n${currency.format(r.valor)}',
+                            textAlign: TextAlign.right),
+                      );
+                    },
+                  ),
+                ),
         ),
       ]),
     );
   }
 }
 
-/// =====================
-///        VENTAS
-/// =====================
+/// ===== Pantalla: Ventas =====
 
-class SalesScreen extends StatefulWidget { const SalesScreen({super.key}); @override State<SalesScreen> createState()=>_SalesScreenState(); }
-class _SalesScreenState extends State<SalesScreen>{
-  final repo=SalesRepo(); final inv=InventoryRepo(); final cash=CashRepo(); List<Sale> sales=[];
-  @override void initState(){ super.initState(); _load(); }
-  Future<void> _load() async { sales=await repo.load(); setState((){}); }
+class SalesScreen extends StatefulWidget {
+  const SalesScreen({super.key});
+  @override
+  State<SalesScreen> createState() => _SalesScreenState();
+}
 
-  Map<String,double> get resumenPorDia { final m=<String,double>{}; for(final s in sales){ m[s.fecha]=(m[s.fecha]??0)+s.ingreso; } return m; }
+class _SalesScreenState extends State<SalesScreen> {
+  final repo = SalesRepo();
+  final purchaseRepo = PurchaseRepo();
+  final cashRepo = CashRepo();
 
-  Future<void> _nueva() async {
-    final hoy=dateFmt.format(DateTime.now());
-    final res=await showDialog<_VentaTmp>(context: context, builder: (_)=>const _VentaDialog());
-    if(res==null) return;
-    final ar=await inv.consumirRecetaFIFO(recetaPorcion, res.porciones);
-    if(!ar.ok){
-      showDialog(context: context, builder: (_)=>AlertDialog(title: const Text('Faltantes en inventario'), content: Text(ar.faltantes.join('\n')), actions:[TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cerrar'))]));
+  List<Sale> sales = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    sales = await repo.load();
+    sales.sort((a, b) => b.fecha.compareTo(a.fecha));
+    setState(() {});
+  }
+
+  Future<void> _add() async {
+    final res =
+        await showDialog<_NewSale>(context: context, builder: (_) => const _SaleDialog());
+    if (res == null) return;
+
+    // Aplica receta con PEPS
+    final recetaN = {for (final e in recetaPorcion.entries) e.key: e.value};
+    final peps = await purchaseRepo
+        .consumirPEPS(receta: recetaN, porciones: res.porciones);
+
+    if (!peps.ok) {
+      await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+                title: const Text('Inventario insuficiente'),
+                content: Text((peps.faltantes).join('\n')),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Aceptar'))
+                ],
+              ));
       return;
     }
-    final sale = Sale(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: hoy, porciones: res.porciones, precioUnit: res.precioUnit, costoMP: ar.costoMP, nota: res.nota);
-    sales.add(sale); await repo.save(sales);
-    final mv = CashMove(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: hoy, tipo:'Ingreso', concepto:'Venta ${sale.porciones.toStringAsFixed(0)} porciones', monto: sale.ingreso);
-    final movs = await cash.loadMoves()..add(mv); await cash.saveMoves(movs);
-    setState((){});
+
+    final double ingreso = res.porciones * res.precioUnit;
+    final double mo = res.porciones * COSTO_MO;
+    final double gi = res.porciones * COSTO_GI;
+    final double costoTotal = peps.costoMP + mo + gi;
+    final double ganancia = ingreso - costoTotal;
+
+    final sale = Sale(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      fecha: dateFmt.format(DateTime.now()),
+      porciones: res.porciones,
+      precioUnit: res.precioUnit,
+      ingreso: ingreso,
+      costoMP: peps.costoMP,
+      costoMO: mo,
+      costoGI: gi,
+      costoTotal: costoTotal,
+      ganancia: ganancia,
+      nota: res.nota ?? '',
+    );
+
+    sales.add(sale);
+    await repo.save(sales);
+
+    // Registrar ingreso a caja
+    final mv = CashMove(
+        id: sale.id,
+        fecha: sale.fecha,
+        tipo: 'Ingreso',
+        concepto: 'Ventas · ${sale.porciones.toStringAsFixed(0)} porciones',
+        monto: ingreso);
+    final moves = await cashRepo.loadMoves()..add(mv);
+    await cashRepo.saveMoves(moves);
+
+    _load();
+  }
+
+  Map<String, double> get diarios {
+    final m = <String, double>{};
+    for (final s in sales) {
+      m[s.fecha] = (m[s.fecha] ?? 0) + s.ingreso;
+    }
+    return m;
   }
 
   Future<void> _exportPdf() async {
     final pdf = pw.Document();
-    final headers=['Fecha','Porciones','P.Unit','Ingreso','MP(PEPS)','MO','GI','Ganancia','Nota'];
-    final rows = sales.map((s)=>[s.fecha,s.porciones.toStringAsFixed(0),currency.format(s.precioUnit),currency.format(s.ingreso),currency.format(s.costoMP),currency.format(s.costoMO),currency.format(s.costoGI),currency.format(s.ganancia),s.nota]).toList();
-    final byDay = resumenPorDia.entries.toList()..sort((a,b)=>b.key.compareTo(a.key));
-    final sum = sales.fold<double>(0,(p,s)=>p+s.ingreso);
-    pdf.addPage(pw.MultiPage(build: (_)=>[
-      pw.Header(level:0, child: pw.Text('Ventas', style: pw.TextStyle(fontSize:20))),
-      pw.Text('Generado: ${dateFmt.format(DateTime.now())}  ·  Total ingresos: ${currency.format(sum)}'),
-      pw.SizedBox(height:8),
-      pw.Text('Resumen por día'),
-      pw.Table.fromTextArray(headers: ['Día','Total'], data: byDay.map((e)=>[e.key, currency.format(e.value)]).toList()),
-      pw.SizedBox(height:8),
-      pw.Text('Detalle'),
-      pw.Table.fromTextArray(headers: headers, data: rows),
-    ]));
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'ventas.pdf');
+    final headers = ['Fecha', 'Porciones', 'P.Unit', 'Ingreso', 'MP(PEPS)', 'MO', 'GI', 'Costo', 'Ganancia', 'Nota'];
+    final data = sales
+        .map((s) => [
+              s.fecha,
+              s.porciones.toStringAsFixed(0),
+              currency.format(s.precioUnit),
+              currency.format(s.ingreso),
+              currency.format(s.costoMP),
+              currency.format(s.costoMO),
+              currency.format(s.costoGI),
+              currency.format(s.costoTotal),
+              currency.format(s.ganancia),
+              s.nota
+            ])
+        .toList();
+    final sum = sales.fold<double>(0, (p, e) => p + e.ingreso);
+    pdf.addPage(pw.MultiPage(build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Ventas', style: pw.TextStyle(fontSize: 20))),
+          pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+          pw.SizedBox(height: 8),
+          pw.Text('Acumulado ingresos: ${currency.format(sum)}'),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(headers: headers, data: data),
+        ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'ventas.pdf');
   }
 
-  List<dynamic> _xs(List<dynamic> row) => row.map((e)=> (e is num)? e.toString() : (e?.toString() ?? '')).toList();
   Future<void> _exportExcel() async {
     final excel = ex.Excel.createExcel();
     final s1 = excel['Ventas'];
-    s1.appendRow(_xs(['Fecha','Porciones','P.Unit','Ingreso','MP(PEPS)','MO','GI','Ganancia','Nota']));
-    for(final s in sales){
-      s1.appendRow(_xs([s.fecha,s.porciones,s.precioUnit,s.ingreso,s.costoMP,s.costoMO,s.costoGI,s.ganancia,s.nota]));
+    s1.appendRow(xsRow(
+        ['Fecha', 'Porciones', 'P.Unit', 'Ingreso', 'MP(PEPS)', 'MO', 'GI', 'Costo', 'Ganancia', 'Nota']));
+    for (final s in sales) {
+      s1.appendRow(xsRow([
+        s.fecha,
+        s.porciones,
+        s.precioUnit,
+        s.ingreso,
+        s.costoMP,
+        s.costoMO,
+        s.costoGI,
+        s.costoTotal,
+        s.ganancia,
+        s.nota
+      ]));
     }
-    final s2 = excel['Resumen_por_dia'];
-    s2.appendRow(_xs(['Día','Total']));
-    resumenPorDia.forEach((k,v)=> s2.appendRow(_xs([k,v])));
     final bytes = excel.encode()!;
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/ventas.xlsx';
-    await File(path).writeAsBytes(bytes, flush:true);
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
     await Share.shareXFiles([XFile(path)]);
   }
 
   @override
-  Widget build(BuildContext context){
-    final sum = sales.fold<double>(0,(p,s)=>p+s.ingreso);
-    final grouped = resumenPorDia.entries.toList()..sort((a,b)=>b.key.compareTo(a.key));
+  Widget build(BuildContext context) {
+    final sum = sales.fold<double>(0, (p, e) => p + e.ingreso);
+    final grouped = diarios.entries.toList()
+      ..sort((a, b) => b.key.compareTo(a.key));
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Ventas'), actions:[
-        PopupMenuButton<String>(onSelected:(v){ if(v=='pdf')_exportPdf(); if(v=='xlsx')_exportExcel(); }, itemBuilder:(_)=>const [
-          PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
-          PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
-        ])
-      ]),
-      floatingActionButton: FloatingActionButton.extended(onPressed:_nueva, icon: const Icon(Icons.add), label: const Text('Venta')),
-      body: Column(children:[
-        Padding(padding: const EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[
-          Text('Registros: ${sales.length}'),
-          Text('Acumulado: ${currency.format(sum)}'),
-        ])),
-        const Divider(),
-        Expanded(child: grouped.isEmpty ? const Center(child: Text('Sin ventas')) :
-          ListView.separated(itemCount: grouped.length, separatorBuilder: (_,__)=>
-            const Divider(height:1), itemBuilder: (_ ,i){
-              final e=grouped[i];
-              return ListTile(
-                title: Text(e.key),
-                trailing: Text(currency.format(e.value)),
-                onTap: (){
-                  final det = sales.where((s)=>s.fecha==e.key).toList();
-                  showModalBottomSheet(context: context, showDragHandle: true, builder: (_)=>ListView(padding: const EdgeInsets.all(12), children:[
-                    Text('Detalle del ${e.key}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height:8),
-                    ...det.map((s)=>ListTile(
-                      title: Text('${s.porciones.toStringAsFixed(0)} porciones · ${currency.format(s.ingreso)}'),
-                      subtitle: Text('MP(PEPS): ${currency.format(s.costoMP)} · MO: ${currency.format(s.costoMO)} · GI: ${currency.format(s.costoGI)}'),
-                      trailing: Text('G: ${currency.format(s.ganancia)}'),
-                    )),
-                  ]));
-                },
-              );
-            })
+      appBar: AppBar(
+        title: const Text('Ventas'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'pdf') _exportPdf();
+              if (v == 'xlsx') _exportExcel();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
+              PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
+            ],
+          )
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+          onPressed: _add, icon: const Icon(Icons.add), label: const Text('Venta')),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Registros: ${sales.length}'),
+                Text('Ingresos: ${currency.format(sum)}'),
+              ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: grouped.isEmpty
+              ? const Center(child: Text('Sin ventas registradas'))
+              : ListView.separated(
+                  itemCount: grouped.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final e = grouped[i];
+                    return ListTile(
+                      title: Text(e.key),
+                      trailing: Text(currency.format(e.value)),
+                      onTap: () {
+                        final det = sales.where((s) => s.fecha == e.key).toList();
+                        showModalBottomSheet(
+                            context: context,
+                            showDragHandle: true,
+                            builder: (_) => ListView(
+                                  padding: const EdgeInsets.all(12),
+                                  children: [
+                                    Text('Detalle del ${e.key}',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 8),
+                                    ...det.map((s) => ListTile(
+                                          title: Text(
+                                              '${s.porciones.toStringAsFixed(0)} porciones · ${currency.format(s.ingreso)}'),
+                                          subtitle: Text(
+                                              'MP: ${currency.format(s.costoMP)}  ·  MO: ${currency.format(s.costoMO)}  ·  GI: ${currency.format(s.costoGI)}\n'
+                                              'Ganancia: ${currency.format(s.ganancia)}${s.nota.isEmpty ? '' : '\n${s.nota}'}'),
+                                        )),
+                                  ],
+                                ));
+                      },
+                    );
+                  }),
         ),
       ]),
     );
   }
 }
 
-class _VentaTmp { final double porciones, precioUnit; final String nota; _VentaTmp(this.porciones, this.precioUnit, this.nota); }
-class _VentaDialog extends StatefulWidget { const _VentaDialog(); @override State<_VentaDialog> createState()=>_VentaDialogState(); }
-class _VentaDialogState extends State<_VentaDialog>{
-  final porciones=TextEditingController(); final precio=TextEditingController(); final nota=TextEditingController();
-  @override Widget build(BuildContext context){
-    return AlertDialog(title: const Text('Nueva venta'), content: Column(mainAxisSize: MainAxisSize.min, children:[
-      Text('Fecha: ${dateFmt.format(DateTime.now())}'),
-      const SizedBox(height:8),
-      TextField(controller:porciones, keyboardType: const TextInputType.numberWithOptions(decimal:true), decoration: const InputDecoration(labelText:'Porciones')),
-      const SizedBox(height:8),
-      TextField(controller:precio, keyboardType: const TextInputType.numberWithOptions(decimal:true), decoration: const InputDecoration(labelText:'Precio por porción')),
-      const SizedBox(height:8),
-      TextField(controller:nota, decoration: const InputDecoration(labelText:'Nota (opcional)')),
-    ]), actions:[
-      TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancelar')),
-      FilledButton(onPressed: (){
-        final p=double.tryParse(porciones.text.replaceAll(',', '.'))??0;
-        final u=double.tryParse(precio.text.replaceAll(',', '.'))??0;
-        Navigator.pop(context, _VentaTmp(p,u,nota.text.trim()));
-      }, child: const Text('Guardar')),
-    ]);
+class _NewSale {
+  final double porciones;
+  final double precioUnit;
+  final String? nota;
+  _NewSale(this.porciones, this.precioUnit, this.nota);
+}
+
+class _SaleDialog extends StatefulWidget {
+  const _SaleDialog();
+  @override
+  State<_SaleDialog> createState() => _SaleDialogState();
+}
+
+class _SaleDialogState extends State<_SaleDialog> {
+  final porciones = TextEditingController();
+  final precio = TextEditingController();
+  final nota = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final hoy = dateFmt.format(DateTime.now());
+    return AlertDialog(
+      title: const Text('Nueva venta'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              enabled: false,
+              decoration: InputDecoration(labelText: 'Fecha', hintText: hoy)),
+          const SizedBox(height: 8),
+          TextField(
+              controller: porciones,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Porciones vendidas')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: precio,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Precio por porción')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: nota, decoration: const InputDecoration(labelText: 'Nota (opcional)')),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () {
+              final p = double.tryParse(porciones.text.replaceAll(',', '.')) ?? 0.0;
+              final u = double.tryParse(precio.text.replaceAll(',', '.')) ?? 0.0;
+              Navigator.pop(context, _NewSale(p, u, nota.text.trim().isEmpty ? null : nota.text.trim()));
+            },
+            child: const Text('Guardar')),
+      ],
+    );
   }
 }
 
-/// =====================
-///         CAJA
-/// =====================
+/// ===== Pantalla: Caja =====
 
-class CashScreen extends StatefulWidget { const CashScreen({super.key}); @override State<CashScreen> createState()=>_CashScreenState(); }
-class _CashScreenState extends State<CashScreen>{
-  final repo=CashRepo(); List<CashMove> moves=[]; List<CashCount> counts=[];
-  @override void initState(){ super.initState(); _load(); }
-  Future<void> _load() async { moves=await repo.loadMoves(); counts=await repo.loadCounts(); setState((){}); }
-  double get saldoTeorico { final ing=moves.where((m)=>m.tipo=='Ingreso').fold<double>(0,(p,m)=>p+m.monto); final egr=moves.where((m)=>m.tipo=='Egreso').fold<double>(0,(p,m)=>p+m.monto); return ing-egr; }
-  double? get ultimoArqueo { if(counts.isEmpty) return null; counts.sort((a,b)=>b.fecha.compareTo(a.fecha)); return counts.first.total; }
-  Future<void> _addMove() async { final res=await showDialog<CashMove>(context: context, builder: (_)=>const _MoveDialog()); if(res!=null){ moves.add(res); await repo.saveMoves(moves); setState((){});} }
-  Future<void> _addCount() async { final res=await showDialog<CashCount>(context: context, builder: (_)=>const _CountDialog()); if(res!=null){ counts.add(res); await repo.saveCounts(counts); setState((){});} }
+class CashScreen extends StatefulWidget {
+  const CashScreen({super.key});
+  @override
+  State<CashScreen> createState() => _CashScreenState();
+}
+
+class _CashScreenState extends State<CashScreen> {
+  final repo = CashRepo();
+  List<CashMove> moves = [];
+  List<CashCount> counts = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    moves = await repo.loadMoves();
+    counts = await repo.loadCounts();
+    setState(() {});
+  }
+
+  double get saldoTeorico {
+    final ing = moves
+        .where((m) => m.tipo == 'Ingreso')
+        .fold<double>(0, (p, m) => p + m.monto);
+    final egr = moves
+        .where((m) => m.tipo == 'Egreso')
+        .fold<double>(0, (p, m) => p + m.monto);
+    return ing - egr;
+  }
+
+  double? get ultimoArqueo {
+    if (counts.isEmpty) return null;
+    counts.sort((a, b) => b.fecha.compareTo(a.fecha));
+    return counts.first.total;
+  }
+
+  Future<void> _addMove() async {
+    final res =
+        await showDialog<CashMove>(context: context, builder: (_) => const _MoveDialog());
+    if (res != null) {
+      moves.add(res);
+      await repo.saveMoves(moves);
+      setState(() {});
+    }
+  }
+
+  Future<void> _addCount() async {
+    final res =
+        await showDialog<CashCount>(context: context, builder: (_) => const _CountDialog());
+    if (res != null) {
+      counts.add(res);
+      await repo.saveCounts(counts);
+      setState(() {});
+    }
+  }
 
   Future<void> _exportPdf() async {
     final pdf = pw.Document();
-    final mh=['Fecha','Tipo','Concepto','Monto'];
-    final mrows=moves.map((m)=>[m.fecha,m.tipo,m.concepto,currency.format(m.monto)]).toList();
-    final ch=['Fecha','Q200','Q100','Q50','Q20','Q10','Q5','Q1','Q0.50','Q0.25','Total'];
-    final crows=counts.map((c)=>[c.fecha,c.denom['200']??0,c.denom['100']??0,c.denom['50']??0,c.denom['20']??0,c.denom['10']??0,c.denom['5']??0,c.denom['1']??0,c.denom['0.50']??0,c.denom['0.25']??0,currency.format(c.total)]).toList();
-    pdf.addPage(pw.MultiPage(build: (_)=>[
-      pw.Header(level:0, child: pw.Text('Caja', style: pw.TextStyle(fontSize:20))),
-      pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
-      pw.SizedBox(height:8),
-      pw.Text('Saldo teórico: ${currency.format(saldoTeorico)}'),
-      pw.Text('Último arqueo: ${ultimoArqueo==null?'-':currency.format(ultimoArqueo!)}'),
-      if(ultimoArqueo!=null) pw.Text('Diferencia: ${currency.format(ultimoArqueo!-saldoTeorico)}'),
-      pw.SizedBox(height:8),
-      pw.Text('Movimientos'),
-      pw.Table.fromTextArray(headers: mh, data: mrows),
-      pw.SizedBox(height:8),
-      pw.Text('Arqueos'),
-      pw.Table.fromTextArray(headers: ch, data: crows),
-    ]));
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'caja.pdf');
+    final headers = ['Fecha', 'Tipo', 'Concepto', 'Monto'];
+    final data =
+        moves.map((m) => [m.fecha, m.tipo, m.concepto, currency.format(m.monto)]).toList();
+    pdf.addPage(pw.MultiPage(build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Caja', style: pw.TextStyle(fontSize: 20))),
+          pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+          pw.SizedBox(height: 8),
+          pw.Text('Saldo teórico: ${currency.format(saldoTeorico)}'),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(headers: headers, data: data),
+          if (ultimoArqueo != null) ...[
+            pw.SizedBox(height: 8),
+            pw.Text('Último arqueo: ${currency.format(ultimoArqueo!)}'),
+            pw.Text('Diferencia: ${currency.format((ultimoArqueo ?? 0) - saldoTeorico)}'),
+          ]
+        ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'caja.pdf');
   }
 
-  List<dynamic> _xs(List<dynamic> row) => row.map((e)=> (e is num)? e.toString() : (e?.toString() ?? '')).toList();
   Future<void> _exportExcel() async {
     final excel = ex.Excel.createExcel();
-    final s1=excel['Caja_Movimientos']; s1.appendRow(_xs(['Fecha','Tipo','Concepto','Monto']));
-    for(final m in moves){ s1.appendRow(_xs([m.fecha,m.tipo,m.concepto,m.monto])); }
-    final s2=excel['Caja_Arqueos']; s2.appendRow(_xs(['Fecha','Q200','Q100','Q50','Q20','Q10','Q5','Q1','Q0.50','Q0.25','Total']));
-    for(final c in counts){ s2.appendRow(_xs([c.fecha,c.denom['200']??0,c.denom['100']??0,c.denom['50']??0,c.denom['20']??0,c.denom['10']??0,c.denom['5']??0,c.denom['1']??0,c.denom['0.50']??0,c.denom['0.25']??0,c.total])); }
-    final bytes=excel.encode()!; final dir=await getTemporaryDirectory(); final path='${dir.path}/caja.xlsx'; await File(path).writeAsBytes(bytes, flush:true); await Share.shareXFiles([XFile(path)]);
+    final s1 = excel['Movimientos'];
+    s1.appendRow(xsRow(['Fecha', 'Tipo', 'Concepto', 'Monto']));
+    for (final m in moves) {
+      s1.appendRow(xsRow([m.fecha, m.tipo, m.concepto, m.monto]));
+    }
+    final s2 = excel['Arqueos'];
+    s2.appendRow(xsRow(
+        ['Fecha', 'Q200', 'Q100', 'Q50', 'Q20', 'Q10', 'Q5', 'Q1', 'Q0.50', 'Q0.25', 'Total']));
+    for (final c in counts) {
+      s2.appendRow(xsRow([
+        c.fecha,
+        c.denom['200'] ?? 0,
+        c.denom['100'] ?? 0,
+        c.denom['50'] ?? 0,
+        c.denom['20'] ?? 0,
+        c.denom['10'] ?? 0,
+        c.denom['5'] ?? 0,
+        c.denom['1'] ?? 0,
+        c.denom['0.50'] ?? 0,
+        c.denom['0.25'] ?? 0,
+        c.total
+      ]));
+    }
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/caja.xlsx';
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles([XFile(path)]);
   }
 
   @override
-  Widget build(BuildContext context){
-    final dif = ultimoArqueo==null? null : (ultimoArqueo!-saldoTeorico);
+  Widget build(BuildContext context) {
+    final dif = ultimoArqueo == null ? null : (ultimoArqueo! - saldoTeorico);
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Caja'), actions:[
-        PopupMenuButton<String>(onSelected:(v){ if(v=='pdf')_exportPdf(); if(v=='xlsx')_exportExcel(); }, itemBuilder:(_)=>const [
-          PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
-          PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
-        ])
-      ]),
-      floatingActionButton: Column(mainAxisSize: MainAxisSize.min, children:[
-        FloatingActionButton.extended(heroTag:'m1', onPressed:_addMove, icon: const Icon(Icons.swap_vert), label: const Text('Movimiento')),
-        const SizedBox(height:8),
-        FloatingActionButton.extended(heroTag:'m2', onPressed:_addCount, icon: const Icon(Icons.calculate_outlined), label: const Text('Arqueo')),
-      ]),
-      body: Column(children:[
-        Padding(padding: const EdgeInsets.all(12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[
-          Text('Saldo teórico: ${currency.format(saldoTeorico)}'),
-          Text(ultimoArqueo==null? 'Sin arqueo' : 'Último arqueo: ${currency.format(ultimoArqueo)}'),
-        ])),
-        if(dif!=null) Padding(padding: const EdgeInsets.symmetric(horizontal:12), child: Align(alignment: Alignment.centerLeft, child: Text('Diferencia: ${currency.format(dif)}'))),
-        const Divider(),
-        Expanded(child: ListView(children:[
-          const ListTile(title: Text('Movimientos')),
-          if(moves.isEmpty) const ListTile(title: Text('— Sin movimientos —')) else ...moves.map((m)=>ListTile(
-            leading: Icon(m.tipo=='Ingreso'? Icons.arrow_downward : Icons.arrow_upward, color: m.tipo=='Ingreso'? Colors.green : Colors.red),
-            title: Text('${m.tipo} · ${currency.format(m.monto)}'),
-            subtitle: Text('${m.concepto}\n${m.fecha}'), isThreeLine: true,
-          )),
-          const Divider(),
-          const ListTile(title: Text('Arqueos')),
-          if(counts.isEmpty) const ListTile(title: Text('— Sin arqueos —')) else ...counts.map((c)=>ListTile(
-            title: Text('${c.fecha} · Contado: ${currency.format(c.total)}'),
-          )),
-        ])),
+      appBar: AppBar(
+        title: const Text('Caja'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'pdf') _exportPdf();
+              if (v == 'xlsx') _exportExcel();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
+              PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
+            ],
+          )
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.extended(
+              heroTag: 'm1',
+              onPressed: _addMove,
+              icon: const Icon(Icons.swap_vert),
+              label: const Text('Movimiento')),
+          const SizedBox(height: 8),
+          FloatingActionButton.extended(
+              heroTag: 'm2',
+              onPressed: _addCount,
+              icon: const Icon(Icons.calculate_outlined),
+              label: const Text('Arqueo')),
+        ],
+      ),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child:
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Saldo teórico: ${currency.format(saldoTeorico)}'),
+            Text(ultimoArqueo == null
+                ? 'Sin arqueo'
+                : 'Último arqueo: ${currency.format(ultimoArqueo)}'),
+          ]),
+        ),
+        if (dif != null)
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Diferencia: ${currency.format(dif)}'))),
+        const Divider(height: 1),
+        Expanded(
+          child: moves.isEmpty
+              ? const Center(child: Text('Sin movimientos'))
+              : ListView.separated(
+                  itemCount: moves.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final m = moves[i];
+                    return ListTile(
+                      leading: Icon(m.tipo == 'Ingreso'
+                          ? Icons.arrow_downward
+                          : Icons.arrow_upward),
+                      title: Text('${m.tipo} · ${currency.format(m.monto)}'),
+                      subtitle: Text('${m.concepto}\n${m.fecha}'),
+                      isThreeLine: true,
+                      trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            moves.removeAt(i);
+                            await repo.saveMoves(moves);
+                            setState(() {});
+                          }),
+                    );
+                  }),
+        ),
       ]),
     );
   }
 }
-class _MoveDialog extends StatefulWidget { const _MoveDialog(); @override State<_MoveDialog> createState()=>_MoveDialogState(); }
-class _MoveDialogState extends State<_MoveDialog>{
-  String tipo='Ingreso'; final concepto=TextEditingController(); final monto=TextEditingController();
-  @override Widget build(BuildContext context){
-    final hoy=dateFmt.format(DateTime.now());
-    return AlertDialog(title: const Text('Nuevo movimiento'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children:[
-      DropdownButtonFormField<String>(value: tipo, items: const [DropdownMenuItem(value:'Ingreso', child: Text('Ingreso')), DropdownMenuItem(value:'Egreso', child: Text('Egreso'))], onChanged:(v)=>setState(()=>tipo=v??'Ingreso'), decoration: const InputDecoration(labelText:'Tipo')),
-      const SizedBox(height:8),
-      TextField(controller: concepto, decoration: const InputDecoration(labelText:'Concepto')),
-      const SizedBox(height:8),
-      TextField(controller:monto, keyboardType: const TextInputType.numberWithOptions(decimal:true), decoration: const InputDecoration(labelText:'Monto')),
-    ])), actions:[
-      TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancelar')),
-      FilledButton(onPressed: (){
-        final mv = CashMove(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: hoy, tipo: tipo, concepto: concepto.text.trim(), monto: double.tryParse(monto.text.replaceAll(',', '.')) ?? 0.0);
-        Navigator.pop(context, mv);
-      }, child: const Text('Guardar')),
-    ]);
-  }
+
+class _MoveDialog extends StatefulWidget {
+  const _MoveDialog();
+  @override
+  State<_MoveDialog> createState() => _MoveDialogState();
 }
-class _CountDialog extends StatefulWidget { const _CountDialog(); @override State<_CountDialog> createState()=>_CountDialogState(); }
-class _CountDialogState extends State<_CountDialog>{
-  final Map<String, TextEditingController> ctrl = {'200':TextEditingController(text:'0'),'100':TextEditingController(text:'0'),'50':TextEditingController(text:'0'),'20':TextEditingController(text:'0'),'10':TextEditingController(text:'0'),'5':TextEditingController(text:'0'),'1':TextEditingController(text:'0'),'0.50':TextEditingController(text:'0'),'0.25':TextEditingController(text:'0')};
-  double _calcTotal(){ double t=0; ctrl.forEach((k,v){ final c=int.tryParse(v.text)??0; final val=double.parse(k); t+=c*val; }); return t; }
-  @override Widget build(BuildContext context){
-    final hoy=dateFmt.format(DateTime.now());
-    return AlertDialog(title: const Text('Arqueo de caja'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children:[
-      Wrap(spacing:8, runSpacing:8, children: ctrl.keys.map((k)=>SizedBox(width:100, child: TextField(controller: ctrl[k], keyboardType: TextInputType.number, decoration: InputDecoration(labelText:'Q $k'), onChanged: (_)=>setState((){})))).toList()),
-      const SizedBox(height:8),
-      Align(alignment: Alignment.centerLeft, child: Text('Total contado: ${currency.format(_calcTotal())}')),
-    ])), actions:[
-      TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancelar')),
-      FilledButton(onPressed: (){ final denom={for(final e in ctrl.entries) e.key: int.tryParse(e.value.text) ?? 0}; final cc=CashCount(id: DateTime.now().millisecondsSinceEpoch.toString(), fecha: hoy, denom: denom); Navigator.pop(context, cc); }, child: const Text('Guardar'))
-    ]);
+
+class _MoveDialogState extends State<_MoveDialog> {
+  String tipo = 'Ingreso';
+  final concepto = TextEditingController();
+  final monto = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final hoy = dateFmt.format(DateTime.now());
+    return AlertDialog(
+      title: const Text('Nuevo movimiento'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(
+            value: tipo,
+            items: const [
+              DropdownMenuItem(value: 'Ingreso', child: Text('Ingreso')),
+              DropdownMenuItem(value: 'Egreso', child: Text('Egreso')),
+            ],
+            onChanged: (v) => setState(() => tipo = v ?? 'Ingreso'),
+            decoration: const InputDecoration(labelText: 'Tipo'),
+          ),
+          const SizedBox(height: 8),
+          TextField(controller: concepto, decoration: const InputDecoration(labelText: 'Concepto')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: monto,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Monto')),
+          const SizedBox(height: 8),
+          TextField(
+              enabled: false,
+              decoration: InputDecoration(labelText: 'Fecha', hintText: hoy)),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+            onPressed: () {
+              final m = CashMove(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  fecha: hoy,
+                  tipo: tipo,
+                  concepto: concepto.text.trim(),
+                  monto: double.tryParse(monto.text.replaceAll(',', '.')) ??
+                      0.0);
+              Navigator.pop(context, m);
+            },
+            child: const Text('Guardar')),
+      ],
+    );
   }
 }
 
-/// =====================
-///   REPORTE DE COSTOS
-/// =====================
+class _CountDialog extends StatefulWidget {
+  const _CountDialog();
+  @override
+  State<_CountDialog> createState() => _CountDialogState();
+}
 
-class CostReportScreen extends StatefulWidget { const CostReportScreen({super.key}); @override State<CostReportScreen> createState()=>_CostReportScreenState(); }
-class _CostReportScreenState extends State<CostReportScreen>{
-  final sRepo=SalesRepo(); List<Sale> all=[]; DateTime from=DateTime.now().subtract(const Duration(days:6)); DateTime to=DateTime.now();
-  @override void initState(){ super.initState(); _load(); }
-  Future<void> _load() async { all=await sRepo.load(); setState((){}); }
-  List<Sale> get filtered { return all.where((s){ final d=DateTime.parse(s.fecha); final a=DateTime(from.year,from.month,from.day); final b=DateTime(to.year,to.month,to.day,23,59,59); return !d.isBefore(a) && !d.isAfter(b); }).toList(); }
-  double get porcionesTotal=>filtered.fold<double>(0,(p,s)=>p+s.porciones);
-  double get ingresoTotal=>filtered.fold<double>(0,(p,s)=>p+s.ingreso);
-  double get costoMP=>filtered.fold<double>(0,(p,s)=>p+s.costoMP);
-  double get costoMO=>filtered.fold<double>(0,(p,s)=>p+s.costoMO);
-  double get costoGI=>filtered.fold<double>(0,(p,s)=>p+s.costoGI);
-  double get costoTotal=>costoMP+costoMO+costoGI;
-  double get gananciaNeta=>ingresoTotal-costoTotal;
+class _CountDialogState extends State<_CountDialog> {
+  final Map<String, TextEditingController> ctrl = {
+    '200': TextEditingController(text: '0'),
+    '100': TextEditingController(text: '0'),
+    '50': TextEditingController(text: '0'),
+    '20': TextEditingController(text: '0'),
+    '10': TextEditingController(text: '0'),
+    '5': TextEditingController(text: '0'),
+    '1': TextEditingController(text: '0'),
+    '0.50': TextEditingController(text: '0'),
+    '0.25': TextEditingController(text: '0'),
+  };
+
+  double _calcTotal() {
+    double t = 0;
+    ctrl.forEach((k, v) {
+      final c = int.tryParse(v.text) ?? 0;
+      final val = double.parse(k);
+      t += c * val;
+    });
+    return t;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hoy = dateFmt.format(DateTime.now());
+    return StatefulBuilder(builder: (context, setSB) {
+      return AlertDialog(
+        title: const Text('Arqueo de caja'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: ctrl.keys
+                  .map((k) => SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: ctrl[k],
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(labelText: 'Q $k'),
+                          onChanged: (_) => setSB(() {}),
+                        ),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 8),
+            Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Total contado: ${currency.format(_calcTotal())}')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () {
+                final denom = {
+                  for (final e in ctrl.entries)
+                    e.key: int.tryParse(e.value.text) ?? 0
+                };
+                final cc = CashCount(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    fecha: hoy,
+                    denom: denom);
+                Navigator.pop(context, cc);
+              },
+              child: const Text('Guardar')),
+        ],
+      );
+    });
+  }
+}
+
+/// ===== Reporte de Costos =====
+
+class CostReportScreen extends StatefulWidget {
+  const CostReportScreen({super.key});
+  @override
+  State<CostReportScreen> createState() => _CostReportScreenState();
+}
+
+class _CostReportScreenState extends State<CostReportScreen> {
+  final repo = SalesRepo();
+  List<Sale> sales = [];
+
+  DateTime? from;
+  DateTime? to;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _pickFrom() async {
+    final now = DateTime.now();
+    final d = await showDatePicker(
+        context: context,
+        firstDate: DateTime(now.year - 2),
+        lastDate: DateTime(now.year + 1),
+        initialDate: from ?? now);
+    if (d != null) setState(() => from = d);
+  }
+
+  Future<void> _pickTo() async {
+    final now = DateTime.now();
+    final d = await showDatePicker(
+        context: context,
+        firstDate: DateTime(now.year - 2),
+        lastDate: DateTime(now.year + 1),
+        initialDate: to ?? now);
+    if (d != null) setState(() => to = d);
+  }
+
+  Future<void> _load() async {
+    sales = await repo.load();
+    setState(() {});
+  }
+
+  List<Sale> get filtered {
+    bool okDate(Sale s) {
+      final d = DateTime.parse(s.fecha);
+      if (from != null && d.isBefore(DateTime(from!.year, from!.month, from!.day))) return false;
+      if (to != null && d.isAfter(DateTime(to!.year, to!.month, to!.day, 23, 59, 59))) return false;
+      return true;
+    }
+
+    return sales.where(okDate).toList();
+  }
+
+  double get sumIngreso =>
+      filtered.fold<double>(0, (p, s) => p + s.ingreso);
+  double get sumMP => filtered.fold<double>(0, (p, s) => p + s.costoMP);
+  double get sumMO => filtered.fold<double>(0, (p, s) => p + s.costoMO);
+  double get sumGI => filtered.fold<double>(0, (p, s) => p + s.costoGI);
+  double get sumCosto => filtered.fold<double>(0, (p, s) => p + s.costoTotal);
+  double get sumGanancia => filtered.fold<double>(0, (p, s) => p + s.ganancia);
 
   Future<void> _exportPdf() async {
-    final pdf=pw.Document();
-    final headers=['Fecha','Porciones','Ingreso','MP(PEPS)','MO','GI','Costo Total','Ganancia'];
-    final rows=filtered.map((s)=>[s.fecha,s.porciones.toStringAsFixed(0),currency.format(s.ingreso),currency.format(s.costoMP),currency.format(s.costoMO),currency.format(s.costoGI),currency.format(s.costoTotal),currency.format(s.ganancia)]).toList();
-    pdf.addPage(pw.MultiPage(build: (_)=>[
-      pw.Header(level:0, child: pw.Text('Reporte de Costos', style: pw.TextStyle(fontSize:20))),
-      pw.Text('Período: ${dateFmt.format(from)} a ${dateFmt.format(to)}'),
-      pw.SizedBox(height:8),
-      pw.Table.fromTextArray(headers: headers, data: rows),
-      pw.SizedBox(height:8),
-      pw.Text('— Totales —'),
-      pw.Bullet(text: 'Porciones: ${porcionesTotal.toStringAsFixed(0)}'),
-      pw.Bullet(text: 'Ingresos: ${currency.format(ingresoTotal)}'),
-      pw.Bullet(text: 'MP(PEPS): ${currency.format(costoMP)}'),
-      pw.Bullet(text: 'MO: ${currency.format(costoMO)}'),
-      pw.Bullet(text: 'GI: ${currency.format(costoGI)}'),
-      pw.Bullet(text: 'Costo total: ${currency.format(costoTotal)}'),
-      pw.Bullet(text: 'Ganancia neta: ${currency.format(gananciaNeta)}'),
-    ]));
-    await Printing.sharePdf(bytes: await pdf.save(), filename: 'reporte_costos.pdf');
+    final pdf = pw.Document();
+    final headers = ['Fecha', 'Porciones', 'Ingreso', 'MP(PEPS)', 'MO', 'GI', 'Costo total', 'Ganancia'];
+    final data = filtered
+        .map((s) => [
+              s.fecha,
+              s.porciones.toStringAsFixed(0),
+              currency.format(s.ingreso),
+              currency.format(s.costoMP),
+              currency.format(s.costoMO),
+              currency.format(s.costoGI),
+              currency.format(s.costoTotal),
+              currency.format(s.ganancia)
+            ])
+        .toList();
+
+    pdf.addPage(pw.MultiPage(build: (_) => [
+          pw.Header(level: 0, child: pw.Text('Reporte de costos', style: pw.TextStyle(fontSize: 20))),
+          pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+          pw.SizedBox(height: 8),
+          pw.Text(
+              'Ingresos: ${currency.format(sumIngreso)} · MP: ${currency.format(sumMP)} · MO: ${currency.format(sumMO)} · GI: ${currency.format(sumGI)}'),
+          pw.Text(
+              'Costo total: ${currency.format(sumCosto)} · Ganancia neta: ${currency.format(sumGanancia)}'),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(headers: headers, data: data),
+        ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'costos.pdf');
   }
 
-  List<dynamic> _xs(List<dynamic> row) => row.map((e)=> (e is num)? e.toString() : (e?.toString() ?? '')).toList();
   Future<void> _exportExcel() async {
     final excel = ex.Excel.createExcel();
-    final s1=excel['Resumen'];
-    s1.appendRow(_xs(['Porciones','Ingresos','MP(PEPS)','MO','GI','Costo total','Ganancia neta']));
-    s1.appendRow(_xs([porcionesTotal,ingresoTotal,costoMP,costoMO,costoGI,costoTotal,gananciaNeta]));
-    final s2=excel['Ventas_detalle'];
-    s2.appendRow(_xs(['Fecha','Porciones','Ingreso','MP(PEPS)','MO','GI','Costo Total','Ganancia']));
-    for(final s in filtered){ s2.appendRow(_xs([s.fecha,s.porciones,s.ingreso,s.costoMP,s.costoMO,s.costoGI,s.costoTotal,s.ganancia])); }
-    final bytes=excel.encode()!; final dir=await getTemporaryDirectory(); final path='${dir.path}/reporte_costos.xlsx'; await File(path).writeAsBytes(bytes, flush:true); await Share.shareXFiles([XFile(path)]);
+    final s1 = excel['Resumen'];
+    s1.appendRow(xsRow(['Ingresos', 'MP(PEPS)', 'MO', 'GI', 'Costo total', 'Ganancia neta']));
+    s1.appendRow(xsRow([sumIngreso, sumMP, sumMO, sumGI, sumCosto, sumGanancia]));
+
+    final s2 = excel['Detalle'];
+    s2.appendRow(xsRow(['Fecha', 'Porciones', 'Ingreso', 'MP(PEPS)', 'MO', 'GI', 'Costo Total', 'Ganancia']));
+    for (final s in filtered) {
+      s2.appendRow(xsRow([s.fecha, s.porciones, s.ingreso, s.costoMP, s.costoMO, s.costoGI, s.costoTotal, s.ganancia]));
+    }
+
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/costos.xlsx';
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles([XFile(path)]);
   }
 
-  Future<void> pickFrom() async { final d=await showDatePicker(context: context, initialDate: from, firstDate: DateTime(2023), lastDate: DateTime(2100)); if(d!=null) setState(()=>from=d); }
-  Future<void> pickTo() async { final d=await showDatePicker(context: context, initialDate: to, firstDate: DateTime(2023), lastDate: DateTime(2100)); if(d!=null) setState(()=>to=d); }
-
   @override
-  Widget build(BuildContext context){
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Reporte de Costos'), actions:[
-        PopupMenuButton<String>(onSelected:(v){ if(v=='pdf')_exportPdf(); if(v=='xlsx')_exportExcel(); }, itemBuilder:(_)=>const [
-          PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
-          PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
-        ])
-      ]),
-      body: ListView(padding: const EdgeInsets.all(16), children:[
-        Row(children:[
-          Expanded(child: OutlinedButton.icon(onPressed: pickFrom, icon: const Icon(Icons.date_range), label: Text('Desde: ${dateFmt.format(from)}'))),
-          const SizedBox(width:8),
-          Expanded(child: OutlinedButton.icon(onPressed: pickTo, icon: const Icon(Icons.date_range), label: Text('Hasta: ${dateFmt.format(to)}'))),
-        ]),
-        const SizedBox(height:12),
-        _kv('Porciones vendidas', porcionesTotal.toStringAsFixed(0)),
-        _kv('Ingresos', currency.format(ingresoTotal)),
-        const Divider(),
-        _kv('Materia prima (PEPS)', currency.format(costoMP)),
-        _kv('Mano de obra', currency.format(costoMO)),
-        _kv('Gastos indirectos', currency.format(costoGI)),
-        _kv('Costo total', currency.format(costoTotal)),
-        const SizedBox(height:12),
-        Container(
+      appBar: AppBar(
+        title: const Text('Reporte de Costos'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'pdf') _exportPdf();
+              if (v == 'xlsx') _exportExcel();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
+              PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
+            ],
+          )
+        ],
+      ),
+      body: Column(children: [
+        Padding(
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: (gananciaNeta>=0? Colors.green : Colors.red).withOpacity(.12), borderRadius: BorderRadius.circular(12)),
-          child: _kv('GANANCIA NETA', currency.format(gananciaNeta), bold:true),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton.tonalIcon(
+                onPressed: _pickFrom,
+                icon: const Icon(Icons.date_range),
+                label: Text('Desde: ${from == null ? '—' : dateFmt.format(from!)}')),
+            FilledButton.tonalIcon(
+                onPressed: _pickTo,
+                icon: const Icon(Icons.date_range_outlined),
+                label: Text('Hasta: ${to == null ? '—' : dateFmt.format(to!)}')),
+          ]),
         ),
-        const SizedBox(height:12),
-        const Text('Ventas del período', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height:8),
-        ...filtered.map((s)=>ListTile(
-          dense:true,
-          title: Text('${s.fecha} · ${s.porciones.toStringAsFixed(0)} porciones'),
-          subtitle: Text('P.Unit: ${currency.format(s.precioUnit)}  ·  MP(PEPS): ${currency.format(s.costoMP)}  ·  MO: ${currency.format(s.costoMO)}  ·  GI: ${currency.format(s.costoGI)}'),
-          trailing: Text('G: ${currency.format(s.ganancia)}'),
-        )),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Ingresos: ${currency.format(sumIngreso)}'),
+            Text('Materia prima (PEPS): ${currency.format(sumMP)}'),
+            Text('Mano de obra: ${currency.format(sumMO)}'),
+            Text('Gastos indirectos: ${currency.format(sumGI)}'),
+            const SizedBox(height: 6),
+            Text('Costo total: ${currency.format(sumCosto)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text('Ganancia neta: ${currency.format(sumGanancia)}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+          ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: filtered.isEmpty
+              ? const Center(child: Text('Sin datos en el rango'))
+              : ListView.separated(
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final s = filtered[i];
+                    return ListTile(
+                      title: Text('${s.fecha} · ${s.porciones.toStringAsFixed(0)} porciones'),
+                      subtitle: Text(
+                          'Ingresos: ${currency.format(s.ingreso)}  ·  Costo: ${currency.format(s.costoTotal)}'),
+                      trailing: Text(currency.format(s.ganancia),
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                    );
+                  }),
+        ),
       ]),
     );
   }
-
-  Widget _kv(String k, String v, {bool bold=false}) => Padding(
-    padding: const EdgeInsets.symmetric(vertical:4),
-    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[
-      Text(k),
-      Text(v, style: TextStyle(fontWeight: bold? FontWeight.bold : FontWeight.normal)),
-    ]),
-  );
 }
