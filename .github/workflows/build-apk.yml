@@ -16,24 +16,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Flutter (stable)
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK 34
+      # 👉 Instala y expone el Android SDK y sdkmanager en PATH
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 👉 Acepta licencias e instala plataformas/herramientas necesarias
+      - name: Install Android packages
         run: |
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
-      # 👉 CREA la carpeta android si no existe
+      # 👉 Crea la carpeta android si aún no existe
       - name: Create Android project structure
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: |
@@ -41,22 +46,15 @@ jobs:
             flutter create . --platforms=android
           fi
 
-      # 👉 Fuerza versiones seguras por si el template trae otras
+      # 👉 Fuerza versiones seguras (por si el template trae otras). No falla si no encuentra.
       - name: Force compileSdk/AGP/Kotlin/Gradle
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}/android
         run: |
-          # Gradle wrapper
           mkdir -p gradle/wrapper
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip" > gradle/wrapper/gradle-wrapper.properties
-
-          # settings.gradle ya lo gestiona Flutter moderno (dev.flutter.*), no tocamos
-
-          # build.gradle raíz: AGP/Kotlin
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip" > gradle/wrapper/gradle-wrapper.properties || true
+          sed -i 's/compileSdk [0-9]\+/compileSdk 34/' app/build.gradle || true
           sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.3.0"/' build.gradle || true
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' build.gradle || true
-
-          # app/build.gradle: compileSdk 34
-          sed -i 's/compileSdk [0-9]\+/compileSdk 34/' app/build.gradle || true
 
       - name: Pub get
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
