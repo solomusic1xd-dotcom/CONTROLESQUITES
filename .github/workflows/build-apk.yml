@@ -5,75 +5,44 @@ on:
   push:
     tags: ['v*.*.*']
 
+env:
+  FLUTTER_PROJECT_DIR: coop_control_app_reports
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Flutter
+      - name: Flutter (stable)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
-          channel: stable
+          channel: 'stable'
           cache: true
 
-      # Crea la carpeta android/ dentro de tu proyecto
-      - name: Generar estructura Android
-        working-directory: ./coop_control_app_reports
-        run: flutter create . --platforms=android
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      # --- PARCHE 1: Poner Kotlin 1.8.22 en el proyecto Android ---
-      - name: Parchar versión de Kotlin a 1.8.22
-        working-directory: ./coop_control_app_reports/android
+      - name: Install Android SDK 34
         run: |
-          # build.gradle (formato viejo con ext.kotlin_version)
-          if grep -q "ext.kotlin_version" build.gradle; then
-            sed -i -E "s/ext\.kotlin_version\s*=\s*'[^']+'/ext.kotlin_version = '1.8.22'/" build.gradle
-          fi
-          # settings.gradle (formato nuevo con plugins DSL)
-          if grep -q "org.jetbrains.kotlin.android" settings.gradle; then
-            sed -i -E "s/id 'org.jetbrains.kotlin.android' version '([^']+)'/id 'org.jetbrains.kotlin.android' version '1.8.22'/" settings.gradle
-          fi
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
-      # --- PARCHE 2: Forzar todas las stdlib de Kotlin a 1.8.22 (evita duplicados) ---
-      - name: Forzar stdlib Kotlin 1.8.22
-        working-directory: ./coop_control_app_reports/android
-        run: |
-          if ! grep -q "resolutionStrategy" build.gradle; then
-            awk '
-              /allprojects\s*\{/ && !patched {
-                print $0;
-                print "  configurations.all {";
-                print "    resolutionStrategy {";
-                print "      force \x27org.jetbrains.kotlin:kotlin-stdlib:1.8.22\x27,";
-                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22\x27,";
-                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22\x27,";
-                print "            \x27org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22\x27";
-                print "    }";
-                print "  }";
-                patched=1; next
-              }
-              { print $0 }
-            ' build.gradle > build.gradle.patched && mv build.gradle.patched build.gradle
-          fi
-
-      - name: Dependencias
-        working-directory: ./coop_control_app_reports
+      - name: Pub get
+        working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: flutter pub get
 
-      - name: Construir APK (debug)
-        working-directory: ./coop_control_app_reports
+      - name: Build debug APK
+        working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: flutter build apk --debug
 
-      - name: Artefacto
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
-          path: coop_control_app_reports/build/app/outputs/flutter-apk/app-debug.apk
+          name: app-debug
+          path: ${{ env.FLUTTER_PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
