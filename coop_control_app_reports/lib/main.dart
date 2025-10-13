@@ -42,7 +42,7 @@ const List<String> catalogoProductos = [
   'MAYONESSA',
 ];
 
-/// Consumo POR PORCIÓN (misma unidad con la que manejas inventario)
+/// Consumo POR PORCIÓN (misma unidad que el inventario)
 final Map<String, double> recetaPorcion = {
   _norm('LIMON'): 0.5,
   _norm('LATA DE MAIZ'): 0.5,
@@ -57,9 +57,16 @@ final Map<String, double> recetaPorcion = {
 
 /// Costos estándar por porción
 const double COSTO_MP = 15.41; // materia prima
-const double COSTO_MO = 3.57; // mano de obra
-const double COSTO_GI = 1.67; // gastos indirectos
+const double COSTO_MO = 3.57;  // mano de obra
+const double COSTO_GI = 1.67;  // gastos indirectos
 const double COSTO_TOTAL_STD = COSTO_MP + COSTO_MO + COSTO_GI; // 20.65
+
+/// Resultado al aplicar la receta (declarado a NIVEL SUPERIOR)
+class ApplyResult {
+  final bool ok;
+  final List<String> faltantes;
+  const ApplyResult(this.ok, this.faltantes);
+}
 
 /// =====================
 /// APP
@@ -147,12 +154,13 @@ class _NavCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final VoidCallback onTap;
-  const _NavCard(
-      {required this.title,
-      required this.subtitle,
-      required this.icon,
-      required this.onTap,
-      super.key});
+  const _NavCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -260,13 +268,6 @@ class InventoryRepo {
       ));
     }
     await save(items);
-  }
-
-  /// Resultado de aplicar receta
-  class ApplyResult {
-    final bool ok;
-    final List<String> faltantes;
-    const ApplyResult(this.ok, this.faltantes);
   }
 
   /// Descuenta inventario con la receta multiplicada por [porciones].
@@ -379,8 +380,13 @@ class Sale {
 
   double get monto => porciones * precioUnit;
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'fecha': fecha, 'porciones': porciones, 'precioUnit': precioUnit, 'nota': nota};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'fecha': fecha,
+        'porciones': porciones,
+        'precioUnit': precioUnit,
+        'nota': nota
+      };
 
   factory Sale.fromJson(Map<String, dynamic> j) => Sale(
         id: j['id'],
@@ -414,22 +420,24 @@ class CashMove {
   final String concepto;
   final double monto;
 
-  CashMove(
-      {required this.id,
-      required this.fecha,
-      required this.tipo,
-      required this.concepto,
-      required this.monto});
+  CashMove({
+    required this.id,
+    required this.fecha,
+    required this.tipo,
+    required this.concepto,
+    required this.monto,
+  });
 
   Map<String, dynamic> toJson() =>
       {'id': id, 'fecha': fecha, 'tipo': tipo, 'concepto': concepto, 'monto': monto};
 
   factory CashMove.fromJson(Map<String, dynamic> j) => CashMove(
-      id: j['id'],
-      fecha: j['fecha'],
-      tipo: j['tipo'],
-      concepto: j['concepto'],
-      monto: (j['monto'] as num).toDouble());
+        id: j['id'],
+        fecha: j['fecha'],
+        tipo: j['tipo'],
+        concepto: j['concepto'],
+        monto: (j['monto'] as num).toDouble(),
+      );
 }
 
 class CashCount {
@@ -453,10 +461,11 @@ class CashCount {
   Map<String, dynamic> toJson() => {'id': id, 'fecha': fecha, 'denom': denom};
 
   factory CashCount.fromJson(Map<String, dynamic> j) => CashCount(
-      id: j['id'],
-      fecha: j['fecha'],
-      denom: (j['denom'] as Map)
-          .map((k, v) => MapEntry(k.toString(), (v as num).toInt())));
+        id: j['id'],
+        fecha: j['fecha'],
+        denom: (j['denom'] as Map)
+            .map((k, v) => MapEntry(k.toString(), (v as num).toInt())),
+      );
 }
 
 class CashRepo {
@@ -515,8 +524,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _addOrEdit({InventoryItem? item}) async {
-    final res =
-        await showDialog<InventoryItem>(context: context, builder: (_) => _ItemDialog(item: item));
+    final res = await showDialog<InventoryItem>(
+        context: context, builder: (_) => _ItemDialog(item: item));
     if (res != null) {
       final i = items.indexWhere((e) => e.id == res.id);
       if (i >= 0) {
@@ -792,9 +801,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     setState(() {});
   }
 
-  double get total {
-    return purchases.fold<double>(0, (p, x) => p + x.total);
-  }
+  double get total => purchases.fold<double>(0, (p, x) => p + x.total);
 
   @override
   Widget build(BuildContext context) {
@@ -952,8 +959,13 @@ class _SalesScreenState extends State<SalesScreen> {
     final pdf = pw.Document();
     final headers = ['Fecha', 'Porciones', 'P.Unit', 'Monto', 'Notas'];
     final data = sales
-        .map((s) =>
-            [s.fecha, s.porciones.toStringAsFixed(0), currency.format(s.precioUnit), currency.format(s.monto), s.nota])
+        .map((s) => [
+              s.fecha,
+              s.porciones.toStringAsFixed(0),
+              currency.format(s.precioUnit),
+              currency.format(s.monto),
+              s.nota
+            ])
         .toList();
     final sum = sales.fold<double>(0, (p, s) => p + s.monto);
     final byDay = resumenPorDia.entries.toList()
@@ -1009,8 +1021,8 @@ class _SalesScreenState extends State<SalesScreen> {
                   PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
                 ])
       ]),
-      floatingActionButton:
-          FloatingActionButton.extended(onPressed: _nuevaVenta, icon: const Icon(Icons.add), label: const Text('Venta')),
+      floatingActionButton: FloatingActionButton.extended(
+          onPressed: _nuevaVenta, icon: const Icon(Icons.add), label: const Text('Venta')),
       body: Column(children: [
         Padding(
             padding: const EdgeInsets.all(12),
@@ -1044,7 +1056,8 @@ class _SalesScreenState extends State<SalesScreen> {
                                     ...det.map((s) => ListTile(
                                           title: Text(
                                               '${s.porciones.toStringAsFixed(0)} porciones · ${currency.format(s.monto)}'),
-                                          subtitle: Text('P.Unit: ${currency.format(s.precioUnit)}\n${s.nota}'),
+                                          subtitle:
+                                              Text('P.Unit: ${currency.format(s.precioUnit)}\n${s.nota}'),
                                           isThreeLine: true,
                                         ))
                                   ],
