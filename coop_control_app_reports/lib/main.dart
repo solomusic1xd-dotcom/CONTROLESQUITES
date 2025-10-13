@@ -148,10 +148,10 @@ class _NavCard extends StatelessWidget {
 class InventoryLot {
   final String id;       // = id de la compra
   final String fecha;    // yyyy-MM-dd
-  final String producto; // nombre normalizado visual
+  final String producto; // nombre visual
   final String unidad;
   final double precioUnit;
-  final double qty;      // disponible (va bajando con ventas)
+  final double qty;      // disponible (baja con ventas)
 
   const InventoryLot({
     required this.id,
@@ -175,7 +175,7 @@ class InventoryLot {
         id: j['id'],
         fecha: j['fecha'],
         producto: j['producto'],
-        unidad: j['unidad'],
+        unidad: j['unidad'] ?? 'unidad',
         precioUnit: (j['precioUnit'] as num).toDouble(),
         qty: (j['qty'] as num).toDouble(),
       );
@@ -254,12 +254,11 @@ class InventoryRepo {
       Map<String, double> receta, double porciones) async {
     final lots = await _loadLots();
 
-    // 1) Verificar faltantes
+    // 1) Faltantes
     final Map<String, double> needByProd = {
       for (final e in receta.entries) e.key: e.value * porciones
     };
     final faltantes = <String>[];
-
     for (final entry in needByProd.entries) {
       final prod = entry.key;
       final need = entry.value;
@@ -275,7 +274,7 @@ class InventoryRepo {
       return ApplyResult(false, faltantes, 0);
     }
 
-    // 2) Descontar FIFO y calcular costo
+    // 2) Descontar FIFO y costo
     double costoMP = 0.0;
     for (final entry in needByProd.entries) {
       final prod = entry.key;
@@ -306,25 +305,8 @@ class InventoryRepo {
         need -= take;
       }
     }
-
-    // 3) guardar
     await _saveLots(lots);
     return ApplyResult(true, const [], costoMP);
-  }
-
-  /// Borrar lote/compra si NO se ha usado nada.
-  Future<bool> borrarCompraSiLibre(String lotId) async {
-    final lots = await _loadLots();
-    final idx = lots.indexWhere((l) => l.id == lotId);
-    if (idx < 0) return false;
-    // si el lote está intacto: qty original =? No la guardamos aparte, pero
-    // podemos inferir que "intacto" si no hay ventas: solo podemos borrar si el
-    // qty es > 0 y NUNCA se redujo. Para eso guardemos un truco: si se usó,
-    // el qty queda < 0? No. Solución práctica: permitimos borrar si el qty > 0
-    // y no existe otro registro de compra con mismo id (siempre único).
-    // Para ser estrictos: añadimos a Purchase el campo unidades y verificamos
-    // contra él. (vemos abajo en PurchaseRepo.delete)
-    return true;
   }
 
   /// Para PurchaseRepo: elimina el lote por id
@@ -590,13 +572,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
     await Printing.sharePdf(bytes: bytes, filename: 'inventario_peps.pdf');
   }
 
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final sh = excel['Inventario'];
+    sh.appendRow(['Producto', 'Unidad', 'Existencia', 'P. Promedio', 'Valor']);
+    for (final r in data) {
+      sh.appendRow([r.producto, r.unidad, r.cantidad, r.precioPromedio, r.valor]);
+    }
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/inventario_peps.xlsx';
+    await File(path).writeAsBytes(bytes, flush: true);
+    await Share.shareXFiles([XFile(path)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = data.fold<double>(0, (p, r) => p + r.valor);
     return Scaffold(
       appBar: AppBar(title: const Text('CONTROL ESQUITES — Inventario (PEPS)'), actions: [
         IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
-        IconButton(onPressed: _exportPdf, icon: const Icon(Icons.picture_as_pdf)),
+        PopupMenuButton<String>(
+          onSelected: (v) { if (v=='pdf') _exportPdf(); if (v=='xlsx') _exportExcel(); },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
+            PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
+          ],
+        ),
       ]),
       body: data.isEmpty
           ? const Center(child: Text('Sin existencias'))
@@ -705,11 +707,9 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   }
 
   Future<void> _delete(Purchase c) async {
-    // solo permitimos borrar si el lote no se usó
     final qtyLote = await inv.qtyDeLote(c.id);
     if (qtyLote == null) return;
     if ((qtyLote - c.unidades).abs() > 1e-9) {
-      // ya se usó algo
       showDialog(
           context: context,
           builder: (_) => const AlertDialog(
@@ -718,13 +718,10 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
               ));
       return;
     }
-
-    // eliminar lote e ítem de compras
     await inv.eliminarLotePorId(c.id);
     compras.removeWhere((x) => x.id == c.id);
     await pRepo.save(compras);
 
-    // revertimos el egreso (ingreso de anulación)
     final mv = CashMove(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       fecha: dateFmt.format(DateTime.now()),
@@ -734,16 +731,56 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     );
     final movs = await cash.loadMoves()..add(mv);
     await cash.saveMoves(movs);
-
     setState(() {});
   }
 
   double get total => compras.fold<double>(0, (p, c) => p + c.total);
 
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final headers = ['Fecha', 'Producto', 'Unidad', 'Unidades', 'P.Unit', 'Total'];
+    final rows = compras.map((c) => [
+      c.fecha, c.producto, c.unidad, c.unidades.toStringAsFixed(3),
+      currency.format(c.precioUnit), currency.format(c.total)
+    ]).toList();
+    pdf.addPage(pw.MultiPage(build: (_)=>[
+      pw.Header(level:0, child: pw.Text('Compras', style: pw.TextStyle(fontSize:20))),
+      pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+      pw.SizedBox(height:8),
+      pw.Table.fromTextArray(headers: headers, data: rows),
+      pw.SizedBox(height:8),
+      pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Total: ${currency.format(total)}')),
+    ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'compras.pdf');
+  }
+
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final sh = excel['Compras'];
+    sh.appendRow(['Fecha','Producto','Unidad','Unidades','P.Unit','Total']);
+    for(final c in compras){
+      sh.appendRow([c.fecha,c.producto,c.unidad,c.unidades,c.precioUnit,c.total]);
+    }
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/compras.xlsx';
+    await File(path).writeAsBytes(bytes, flush:true);
+    await Share.shareXFiles([XFile(path)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Compras')),
+      appBar: AppBar(title: const Text('CONTROL ESQUITES — Compras'), actions: [
+        PopupMenuButton<String>(
+          onSelected: (v){ if(v=='pdf') _exportPdf(); if(v=='xlsx') _exportExcel(); },
+          itemBuilder: (_)=> const [
+            PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
+            PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
+          ],
+        )
+      ]),
       body: Column(
         children: [
           Padding(
@@ -879,7 +916,6 @@ class _SalesScreenState extends State<SalesScreen> {
         context: context, builder: (_) => const _VentaDialog());
     if (res == null) return;
 
-    // consumo FIFO
     final ar = await inv.consumirRecetaFIFO(recetaPorcion, res.porciones);
     if (!ar.ok) {
       showDialog(
@@ -907,7 +943,6 @@ class _SalesScreenState extends State<SalesScreen> {
     sales.add(sale);
     await repo.save(sales);
 
-    // ingreso en caja
     final mv = CashMove(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         fecha: hoy,
@@ -920,13 +955,63 @@ class _SalesScreenState extends State<SalesScreen> {
     setState(() {});
   }
 
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final headers = ['Fecha','Porciones','P.Unit','Ingreso','MP(PEPS)','MO','GI','Ganancia','Nota'];
+    final rows = sales.map((s)=>[
+      s.fecha, s.porciones.toStringAsFixed(0), currency.format(s.precioUnit),
+      currency.format(s.ingreso), currency.format(s.costoMP),
+      currency.format(s.costoMO), currency.format(s.costoGI),
+      currency.format(s.ganancia), s.nota
+    ]).toList();
+    final byDay = resumenPorDia.entries.toList()..sort((a,b)=>b.key.compareTo(a.key));
+    final sum = sales.fold<double>(0,(p,s)=>p+s.ingreso);
+    pdf.addPage(pw.MultiPage(build: (_)=>[
+      pw.Header(level:0, child: pw.Text('Ventas', style: pw.TextStyle(fontSize:20))),
+      pw.Text('Generado: ${dateFmt.format(DateTime.now())}  ·  Total ingresos: ${currency.format(sum)}'),
+      pw.SizedBox(height:8),
+      pw.Text('Resumen por día'),
+      pw.Table.fromTextArray(headers: ['Día','Total'], data: byDay.map((e)=>[e.key, currency.format(e.value)]).toList()),
+      pw.SizedBox(height:8),
+      pw.Text('Detalle'),
+      pw.Table.fromTextArray(headers: headers, data: rows),
+    ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'ventas.pdf');
+  }
+
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final s1 = excel['Ventas'];
+    s1.appendRow(['Fecha','Porciones','P.Unit','Ingreso','MP(PEPS)','MO','GI','Ganancia','Nota']);
+    for(final s in sales){
+      s1.appendRow([s.fecha,s.porciones,s.precioUnit,s.ingreso,s.costoMP,s.costoMO,s.costoGI,s.ganancia,s.nota]);
+    }
+    final s2 = excel['Resumen_por_dia'];
+    s2.appendRow(['Día','Total']);
+    resumenPorDia.forEach((k,v)=> s2.appendRow([k,v]));
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/ventas.xlsx';
+    await File(path).writeAsBytes(bytes, flush:true);
+    await Share.shareXFiles([XFile(path)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final sum = sales.fold<double>(0, (p, s) => p + s.ingreso);
     final grouped = resumenPorDia.entries.toList()
       ..sort((a, b) => b.key.compareTo(a.key));
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Ventas')),
+      appBar: AppBar(title: const Text('CONTROL ESQUITES — Ventas'), actions: [
+        PopupMenuButton<String>(
+          onSelected: (v){ if(v=='pdf') _exportPdf(); if(v=='xlsx') _exportExcel(); },
+          itemBuilder: (_)=> const [
+            PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
+            PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
+          ],
+        )
+      ]),
       floatingActionButton:
           FloatingActionButton.extended(onPressed: _nueva, label: const Text('Venta'), icon: const Icon(Icons.add)),
       body: Column(children: [
@@ -971,7 +1056,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                           subtitle: Text(
                                               'MP (PEPS): ${currency.format(s.costoMP)}  ·  MO: ${currency.format(s.costoMO)}  ·  GI: ${currency.format(s.costoGI)}'),
                                           trailing: Text(
-                                              'Ganancia: ${currency.format(s.ganancia)}'),
+                                              'G: ${currency.format(s.ganancia)}'),
                                         )),
                                   ],
                                 ));
@@ -1093,11 +1178,54 @@ class _CashScreenState extends State<CashScreen> {
     }
   }
 
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final mh = ['Fecha','Tipo','Concepto','Monto'];
+    final mrows = moves.map((m)=>[m.fecha,m.tipo,m.concepto,currency.format(m.monto)]).toList();
+    final ch = ['Fecha','Q200','Q100','Q50','Q20','Q10','Q5','Q1','Q0.50','Q0.25','Total'];
+    final crows = counts.map((c)=>[
+      c.fecha,c.denom['200']??0,c.denom['100']??0,c.denom['50']??0,c.denom['20']??0,c.denom['10']??0,c.denom['5']??0,c.denom['1']??0,c.denom['0.50']??0,c.denom['0.25']??0,currency.format(c.total)
+    ]).toList();
+    pdf.addPage(pw.MultiPage(build: (_)=>[
+      pw.Header(level:0, child: pw.Text('Caja', style: pw.TextStyle(fontSize:20))),
+      pw.Text('Generado: ${dateFmt.format(DateTime.now())}'),
+      pw.SizedBox(height:8),
+      pw.Text('Saldo teórico: ${currency.format(saldoTeorico)}'),
+      pw.Text('Último arqueo: ${ultimoArqueo==null?'-':currency.format(ultimoArqueo!)}'),
+      if(ultimoArqueo!=null) pw.Text('Diferencia: ${currency.format(ultimoArqueo!-saldoTeorico)}'),
+      pw.SizedBox(height:8),
+      pw.Text('Movimientos'),
+      pw.Table.fromTextArray(headers: mh, data: mrows),
+      pw.SizedBox(height:8),
+      pw.Text('Arqueos'),
+      pw.Table.fromTextArray(headers: ch, data: crows),
+    ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'caja.pdf');
+  }
+
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final s1=excel['Caja_Movimientos']; s1.appendRow(['Fecha','Tipo','Concepto','Monto']);
+    for(final m in moves){ s1.appendRow([m.fecha,m.tipo,m.concepto,m.monto]); }
+    final s2=excel['Caja_Arqueos']; s2.appendRow(['Fecha','Q200','Q100','Q50','Q20','Q10','Q5','Q1','Q0.50','Q0.25','Total']);
+    for(final c in counts){ s2.appendRow([c.fecha,c.denom['200']??0,c.denom['100']??0,c.denom['50']??0,c.denom['20']??0,c.denom['10']??0,c.denom['5']??0,c.denom['1']??0,c.denom['0.50']??0,c.denom['0.25']??0,c.total]); }
+    final bytes=excel.encode()!; final dir=await getTemporaryDirectory(); final path='${dir.path}/caja.xlsx'; await File(path).writeAsBytes(bytes, flush:true); await Share.shareXFiles([XFile(path)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final dif = ultimoArqueo == null ? null : (ultimoArqueo! - saldoTeorico);
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Caja')),
+      appBar: AppBar(title: const Text('CONTROL ESQUITES — Caja'), actions: [
+        PopupMenuButton<String>(
+          onSelected: (v){ if(v=='pdf') _exportPdf(); if(v=='xlsx') _exportExcel(); },
+          itemBuilder: (_)=> const [
+            PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
+            PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
+          ],
+        )
+      ]),
       floatingActionButton: Column(mainAxisSize: MainAxisSize.min, children: [
         FloatingActionButton.extended(
             heroTag: 'm1', onPressed: _addMove, icon: const Icon(Icons.swap_vert), label: const Text('Movimiento')),
@@ -1358,10 +1486,62 @@ class _CostReportScreenState extends State<CostReportScreen> {
     if (d != null) setState(() => to = d);
   }
 
+  Future<void> _exportPdf() async {
+    final pdf = pw.Document();
+    final headers = ['Fecha','Porciones','Ingreso','MP(PEPS)','MO','GI','Costo Total','Ganancia'];
+    final rows = filtered.map((s)=>[
+      s.fecha, s.porciones.toStringAsFixed(0), currency.format(s.ingreso),
+      currency.format(s.costoMP), currency.format(s.costoMO), currency.format(s.costoGI),
+      currency.format(s.costoTotal), currency.format(s.ganancia)
+    ]).toList();
+    pdf.addPage(pw.MultiPage(build: (_)=>[
+      pw.Header(level:0, child: pw.Text('Reporte de Costos', style: pw.TextStyle(fontSize:20))),
+      pw.Text('Período: ${dateFmt.format(from)} a ${dateFmt.format(to)}'),
+      pw.SizedBox(height:8),
+      pw.Table.fromTextArray(headers: headers, data: rows),
+      pw.SizedBox(height:8),
+      pw.Text('— Totales —'),
+      pw.Bullet(text: 'Porciones: ${porcionesTotal.toStringAsFixed(0)}'),
+      pw.Bullet(text: 'Ingresos: ${currency.format(ingresoTotal)}'),
+      pw.Bullet(text: 'MP(PEPS): ${currency.format(costoMP)}'),
+      pw.Bullet(text: 'MO: ${currency.format(costoMO)}'),
+      pw.Bullet(text: 'GI: ${currency.format(costoGI)}'),
+      pw.Bullet(text: 'Costo total: ${currency.format(costoTotal)}'),
+      pw.Bullet(text: 'Ganancia neta: ${currency.format(gananciaNeta)}'),
+    ]));
+    final bytes = await pdf.save();
+    await Printing.sharePdf(bytes: bytes, filename: 'reporte_costos.pdf');
+  }
+
+  Future<void> _exportExcel() async {
+    final excel = ex.Excel.createExcel();
+    final s1 = excel['Resumen'];
+    s1.appendRow(['Porciones','Ingresos','MP(PEPS)','MO','GI','Costo total','Ganancia neta']);
+    s1.appendRow([porcionesTotal, ingresoTotal, costoMP, costoMO, costoGI, costoTotal, gananciaNeta]);
+    final s2 = excel['Ventas_detalle'];
+    s2.appendRow(['Fecha','Porciones','Ingreso','MP(PEPS)','MO','GI','Costo Total','Ganancia']);
+    for(final s in filtered){
+      s2.appendRow([s.fecha,s.porciones,s.ingreso,s.costoMP,s.costoMO,s.costoGI,s.costoTotal,s.ganancia]);
+    }
+    final bytes = excel.encode()!;
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/reporte_costos.xlsx';
+    await File(path).writeAsBytes(bytes, flush:true);
+    await Share.shareXFiles([XFile(path)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CONTROL ESQUITES — Reporte de Costos')),
+      appBar: AppBar(title: const Text('CONTROL ESQUITES — Reporte de Costos'), actions: [
+        PopupMenuButton<String>(
+          onSelected: (v){ if(v=='pdf') _exportPdf(); if(v=='xlsx') _exportExcel(); },
+          itemBuilder: (_)=> const [
+            PopupMenuItem(value:'pdf', child: Text('Exportar PDF')),
+            PopupMenuItem(value:'xlsx', child: Text('Exportar Excel')),
+          ],
+        )
+      ]),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
