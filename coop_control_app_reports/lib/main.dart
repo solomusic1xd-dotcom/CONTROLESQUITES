@@ -15,6 +15,44 @@ void main() => runApp(const CoopApp());
 
 final currency = NumberFormat.currency(locale: 'es_GT', symbol: 'Q ');
 final dateFmt = DateFormat('yyyy-MM-dd');
+String _norm(String s) => s
+    .toLowerCase()
+    .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
+    .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ñ','n')
+    .replaceAll(RegExp(r'\s+'), ' ').trim();
+
+/// Catálogo fijo para evitar errores de escritura en compras.
+const List<String> catalogoProductos = [
+  'LIMON',
+  'LATA DE MAIZ',
+  'CHAMOY',
+  'SALSA VALENTINA',
+  'QUESO CHEDAR',        // (escríbelo como lo tengas en inventarios)
+  'DORITOS JALAPEÑOS',
+  'TAJIN',
+  'QUEZO MOZARELLA',
+  'MAYONESSA',
+];
+
+/// Receta: consumo POR PORCIÓN (misma unidad que el inventario).
+final Map<String, double> recetaPorcion = {
+  _norm('LIMON'): 0.5,
+  _norm('LATA DE MAIZ'): 0.5,
+  _norm('CHAMOY'): 0.01,
+  _norm('SALSA VALENTINA'): 0.0142857,
+  _norm('QUESO CHEDAR'): 0.083,
+  _norm('DORITOS JALAPEÑOS'): 1.0,
+  _norm('TAJIN'): 0.00875,
+  _norm('QUEZO MOZARELLA'): 0.10,
+  _norm('MAYONESSA'): 0.0833333,
+};
+
+/// Costos estándar por porción
+const double COSTO_MP = 15.41; // materia prima
+const double COSTO_MO = 3.57;  // mano de obra
+const double COSTO_GI = 1.67;  // gastos indirectos
+const double COSTO_TOTAL_STD = COSTO_MP + COSTO_MO + COSTO_GI; // 20.65
+
 
 class CoopApp extends StatelessWidget {
   const CoopApp({super.key});
@@ -98,6 +136,102 @@ class _NavCard extends StatelessWidget {
 
 // ===== INVENTARIO =====
 class InventoryItem {
+    int _indexByName(List<InventoryItem> items, String nombre) {
+    final n = _norm(nombre);
+    for (int i = 0; i < items.length; i++) {
+      if (_norm(items[i].nombre) == n) return i;
+    }
+    return -1;
+  }
+
+  /// Aumenta existencia por una compra. Crea el artículo si no existe.
+  Future<void> entradaCompra({
+    required String nombre,
+    required double unidades,
+    required double precioUnitario,
+    String unidad = 'unidad',
+  }) async {
+    final items = await load();
+    final idx = _indexByName(items, nombre);
+    if (idx >= 0) {
+      final it = items[idx];
+      items[idx] = InventoryItem(
+        id: it.id,
+        nombre: it.nombre,
+        unidad: it.unidad,
+        precioCompra: precioUnitario, // último precio
+        cantidad: it.cantidad + unidades,
+      );
+    } else {
+      items.add(InventoryItem(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        nombre: nombre,
+        unidad: unidad,
+        precioCompra: precioUnitario,
+        cantidad: unidades,
+      ));
+    }
+    await save(items);
+  }
+
+  /// Aplica receta * porciones y descuenta inventario. Devuelve faltantes si hay.
+  Future<(bool, List<String>)> aplicarReceta(Map<String,double> receta, double porciones) async {
+    final items = await load();
+    final byName = { for (var i = 0; i < items.length; i++) _norm(items[i].nombre) : i };
+    final faltantes = <String>[];
+    receta.forEach((k, v) {
+      final need = v * porciones;
+      final idx = byName[k];
+      if (idx == null) { faltantes.add('$k (no encontrado)'); }
+      else if (items[idx].cantidad < need) {
+        faltantes.add('${items[idx].nombre}: falta ${(need - items[idx].cantidad).toStringAsFixed(3)}');
+      }
+    });
+    if (faltantes.isNotEmpty) return (false, faltantes);
+
+    // descontar
+    receta.forEach((k, v) {
+      final need = v * porciones;
+      final idx = byName[k]!;
+      final it = items[idx];
+      items[idx] = InventoryItem(
+        id: it.id, nombre: it.nombre, unidad: it.unidad,
+        precioCompra: it.precioCompra, cantidad: (it.cantidad - need),
+      );
+    });
+    await save(items);
+    return (true, []);
+  }
+  class Purchase {
+  final String id;
+  final String fecha;          // yyyy-MM-dd (hoy, no editable)
+  final String producto;       // del catálogo
+  final double unidades;
+  final double precioUnit;
+  double get total => unidades * precioUnit;
+  Purchase({required this.id, required this.fecha, required this.producto, required this.unidades, required this.precioUnit});
+  Map<String,dynamic> toJson()=>{'id':id,'fecha':fecha,'producto':producto,'unidades':unidades,'precioUnit':precioUnit};
+  factory Purchase.fromJson(Map<String,dynamic> j)=>Purchase(
+    id: j['id'], fecha: j['fecha'], producto: j['producto'],
+    unidades: (j['unidades'] as num).toDouble(), precioUnit: (j['precioUnit'] as num).toDouble(),
+  );
+}
+
+class PurchaseRepo {
+  static const _key='compras_v1';
+  Future<List<Purchase>> load() async {
+    final p=await SharedPreferences.getInstance();
+    final raw=p.getString(_key); if(raw==null||raw.isEmpty) return [];
+    final list=(jsonDecode(raw) as List).cast<Map<String,dynamic>>();
+    return list.map(Purchase.fromJson).toList();
+  }
+  Future<void> save(List<Purchase> xs) async {
+    final p=await SharedPreferences.getInstance();
+    await p.setString(_key, jsonEncode(xs.map((e)=>e.toJson()).toList()));
+  }
+}
+
+
   final String id;
   final String nombre;
   final String unidad;
