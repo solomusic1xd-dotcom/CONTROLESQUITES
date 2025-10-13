@@ -12,12 +12,13 @@ import 'package:excel/excel.dart' as ex;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// ================== AJUSTES GENERALES ==================
+/// ===== Utilidades y constantes
 
 void main() => runApp(const EsquitesApp());
 
 final DateFormat dateFmt = DateFormat('yyyy-MM-dd');
-final NumberFormat currency = NumberFormat.currency(locale: 'es_GT', symbol: 'Q ');
+final NumberFormat currency =
+    NumberFormat.currency(locale: 'es_GT', symbol: 'Q ');
 
 String _norm(String s) => s
     .toLowerCase()
@@ -30,7 +31,7 @@ String _norm(String s) => s
     .replaceAll(RegExp(r'\s+'), ' ')
     .trim();
 
-/// Excel >= 4.0: cada fila debe ser List<CellValue>
+/// Excel 4.x: cada fila debe ser List<CellValue>
 List<ex.CellValue> xsRow(List<dynamic> row) => row.map<ex.CellValue>((e) {
       if (e is int) return ex.IntCellValue(e);
       if (e is double) return ex.DoubleCellValue(e);
@@ -39,7 +40,6 @@ List<ex.CellValue> xsRow(List<dynamic> row) => row.map<ex.CellValue>((e) {
       return ex.TextCellValue(e?.toString() ?? '');
     }).toList();
 
-/// Catálogo (para lista desplegable)
 const List<String> kCatalogo = [
   'LIMON',
   'LATA DE MAIZ',
@@ -52,7 +52,6 @@ const List<String> kCatalogo = [
   'MAYONESSA',
 ];
 
-/// Receta por PORCIÓN (misma medida que el inventario)
 final Map<String, double> kRecetaPorcion = {
   _norm('LIMON'): 0.5,
   _norm('LATA DE MAIZ'): 0.5,
@@ -65,11 +64,10 @@ final Map<String, double> kRecetaPorcion = {
   _norm('MAYONESSA'): 0.0833333,
 };
 
-/// Costos fijos por porción
-const double kCostoMO = 3.57; // Mano de obra
-const double kCostoGI = 1.67; // Gastos indirectos
+const double kCostoMO = 3.57;
+const double kCostoGI = 1.67;
 
-/// ================== APP ==================
+/// ===== App
 
 class EsquitesApp extends StatelessWidget {
   const EsquitesApp({super.key});
@@ -96,38 +94,49 @@ class HomeScreen extends StatelessWidget {
           _CardNav(
             icon: Icons.shopping_bag_outlined,
             title: 'Compras (PEPS)',
-            subtitle: 'Registra compras por lote (fecha de hoy) y elimina si aún no se usó.',
+            subtitle:
+                'Registra compras por lote. Fecha de hoy automática. Elimina si no se usó.',
             onTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const ComprasScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const ComprasScreen()),
+            ),
           ),
           _CardNav(
             icon: Icons.inventory_2_outlined,
             title: 'Inventario PEPS',
-            subtitle: 'Existencias por producto (suma de lotes pendientes).',
+            subtitle: 'Existencia y valor por producto (suma de lotes).',
             onTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const InventarioScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const InventarioScreen()),
+            ),
           ),
           _CardNav(
             icon: Icons.point_of_sale_outlined,
             title: 'Ventas',
             subtitle:
-                'Registra porciones e ingreso. Descuenta inventario PEPS y calcula costos.',
+                'Porciones e ingreso. Descuenta PEPS y calcula costos/ganancia.',
             onTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const VentasScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const VentasScreen()),
+            ),
           ),
           _CardNav(
             icon: Icons.account_balance_wallet_outlined,
             title: 'Caja',
             subtitle: 'Ingresos/Egresos y Arqueo con denominaciones.',
             onTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const CajaScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const CajaScreen()),
+            ),
           ),
           _CardNav(
             icon: Icons.receipt_long_outlined,
             title: 'Reporte de Costos',
-            subtitle: 'Costo MP (PEPS) + MO + GI y Ganancia por periodo.',
+            subtitle: 'MP (PEPS) + MO + GI y Ganancia por venta.',
             onTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const CostosScreen())),
+              context,
+              MaterialPageRoute(builder: (_) => const CostosScreen()),
+            ),
           ),
         ],
       ),
@@ -149,8 +158,8 @@ class _CardNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ListTile(
         leading: Icon(icon, size: 32),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -162,16 +171,15 @@ class _CardNav extends StatelessWidget {
   }
 }
 
-/// ================== MODELOS / STORAGE ==================
+/// ===== Modelos / Storage
 
-/// Lote de compra (también es el registro de compra)
 class Lote {
-  final String id; // timestamp
-  final String fecha; // yyyy-MM-dd (HOY)
-  final String producto; // catálogo
+  final String id;
+  final String fecha; // yyyy-MM-dd
+  final String producto;
   final double unidadesTotales;
   final double unidadesRestantes;
-  final double precioUnit; // por unidad
+  final double precioUnit;
 
   Lote({
     required this.id,
@@ -218,13 +226,11 @@ class Lote {
       );
 }
 
-/// Venta
 class Venta {
-  final String id; // timestamp
-  final String fecha; // yyyy-MM-dd
-  final double porciones; // cantidad porciones vendidas
-  final double ingreso; // total cobrado
-  // calculados al momento (con PEPS)
+  final String id;
+  final String fecha;
+  final double porciones;
+  final double ingreso;
   final double costoMP;
   final double costoMO;
   final double costoGI;
@@ -263,11 +269,10 @@ class Venta {
       );
 }
 
-/// Caja
 class MovimientoCaja {
   final String id;
   final String fecha;
-  final String tipo; // Ingreso / Egreso
+  final String tipo; // Ingreso/Egreso
   final String concepto;
   final double monto;
 
@@ -293,7 +298,7 @@ class MovimientoCaja {
 class ArqueoCaja {
   final String id;
   final String fecha;
-  final Map<String, int> denom; // '200': 1, '100': 0, etc.
+  final Map<String, int> denom;
 
   ArqueoCaja({required this.id, required this.fecha, required this.denom});
 
@@ -319,14 +324,12 @@ class ArqueoCaja {
       );
 }
 
-/// Storage
 class Store {
   static const _kLotes = 'lotes_v1';
   static const _kVentas = 'ventas_v1';
   static const _kMovs = 'caja_movs_v1';
   static const _kArq = 'caja_arq_v1';
 
-  /// Lotes
   Future<List<Lote>> loadLotes() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_kLotes);
@@ -340,7 +343,6 @@ class Store {
     await p.setString(_kLotes, jsonEncode(xs.map((e) => e.toJson()).toList()));
   }
 
-  /// Ventas
   Future<List<Venta>> loadVentas() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_kVentas);
@@ -354,7 +356,6 @@ class Store {
     await p.setString(_kVentas, jsonEncode(xs.map((e) => e.toJson()).toList()));
   }
 
-  /// Caja
   Future<List<MovimientoCaja>> loadMovs() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_kMovs);
@@ -384,12 +385,16 @@ class Store {
 
 final store = Store();
 
-/// ================== LÓGICA PEPS (FIFO) ==================
+/// ===== PEPS (sin records)
+
+class StockCheck {
+  final bool ok;
+  final List<String> faltantes;
+  StockCheck(this.ok, this.faltantes);
+}
 
 class PEPSService {
-  /// Verifica si hay stock suficiente para N porciones según receta.
-  Future<(bool ok, List<String> faltantes)> hayStockParaPorciones(
-      double porciones) async {
+  Future<StockCheck> hayStockParaPorciones(double porciones) async {
     final lotes = await store.loadLotes();
     final byProd = <String, double>{};
     for (final l in lotes) {
@@ -404,21 +409,22 @@ class PEPSService {
             '${k.toUpperCase()}: falta ${(need - (byProd[k] ?? 0)).toStringAsFixed(3)}');
       }
     });
-    return (falt.isEmpty, falt);
+    return StockCheck(falt.isEmpty, falt);
   }
 
-  /// Descuenta del inventario según receta*porciones. Devuelve costo MP total (PEPS).
   Future<double> consumirPorciones(double porciones) async {
     final lotes = await store.loadLotes();
-    // Orden FIFO por fecha e id
+    // FIFO
     lotes.sort((a, b) => a.fecha != b.fecha
         ? a.fecha.compareTo(b.fecha)
         : a.id.compareTo(b.id));
+
     double costoMP = 0.0;
 
     for (final entry in kRecetaPorcion.entries) {
       final prod = entry.key;
-      double rest = entry.value * porciones; // lo que necesito consumir
+      double rest = entry.value * porciones;
+
       for (int i = 0; i < lotes.length && rest > 1e-12; i++) {
         if (_norm(lotes[i].producto) != prod) continue;
         final toma = rest <= lotes[i].unidadesRestantes
@@ -430,16 +436,17 @@ class PEPSService {
             .copyWith(unidadesRestantes: lotes[i].unidadesRestantes - toma);
         rest -= toma;
       }
-      // (asumimos validado previamente)
     }
+
     await store.saveLotes(lotes);
     return costoMP;
   }
 }
 
-/// ================== PANTALLAS ==================
+/// ===== PANTALLAS
 
-/// ---------- COMPRAS ----------
+/// --- Compras (PEPS)
+
 class ComprasScreen extends StatefulWidget {
   const ComprasScreen({super.key});
   @override
@@ -462,8 +469,8 @@ class _ComprasScreenState extends State<ComprasScreen> {
   }
 
   Future<void> _add() async {
-    final res = await showDialog<Lote>(
-        context: context, builder: (_) => const _DlgCompra());
+    final res =
+        await showDialog<Lote>(context: context, builder: (_) => const _DlgCompra());
     if (res != null) {
       lotes.add(res);
       await store.saveLotes(lotes);
@@ -472,26 +479,26 @@ class _ComprasScreenState extends State<ComprasScreen> {
   }
 
   Future<void> _delete(Lote l) async {
-    // Solo si no se ha consumido (restantes == totales)
     if (l.unidadesRestantes + 1e-9 < l.unidadesTotales) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('No puedes borrar: el lote ya fue usado.')));
       return;
     }
     final ok = await showDialog<bool>(
-            context: context,
-            builder: (_) => AlertDialog(
-                  title: const Text('Eliminar compra'),
-                  content: const Text('¿Seguro que deseas eliminarla?'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancelar')),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Eliminar')),
-                  ],
-                )) ??
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Eliminar compra'),
+            content: const Text('¿Seguro que deseas eliminarla?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Eliminar')),
+            ],
+          ),
+        ) ??
         false;
     if (!ok) return;
     lotes.removeWhere((e) => e.id == l.id);
@@ -509,7 +516,7 @@ class _ComprasScreenState extends State<ComprasScreen> {
               l.unidadesTotales.toStringAsFixed(3),
               l.unidadesRestantes.toStringAsFixed(3),
               currency.format(l.precioUnit),
-              currency.format(l.unidadesTotales * l.precioUnit)
+              currency.format(l.unidadesTotales * l.precioUnit),
             ])
         .toList();
     pdf.addPage(pw.MultiPage(build: (_) {
@@ -636,15 +643,18 @@ class _DlgCompraState extends State<_DlgCompra> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
         FilledButton(
             onPressed: () {
-              final u = double.tryParse(unidades.text.replaceAll(',', '.')) ?? 0;
-              final p = double.tryParse(precio.text.replaceAll(',', '.')) ?? 0;
+              final u =
+                  double.tryParse(unidades.text.replaceAll(',', '.')) ?? 0;
+              final p =
+                  double.tryParse(precio.text.replaceAll(',', '.')) ?? 0;
               final l = Lote(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  fecha: hoy,
-                  producto: prod,
-                  unidadesTotales: u,
-                  unidadesRestantes: u,
-                  precioUnit: p);
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                fecha: hoy,
+                producto: prod,
+                unidadesTotales: u,
+                unidadesRestantes: u,
+                precioUnit: p,
+              );
               Navigator.pop(context, l);
             },
             child: const Text('Guardar')),
@@ -653,7 +663,13 @@ class _DlgCompraState extends State<_DlgCompra> {
   }
 }
 
-/// ---------- INVENTARIO (vista agregada por producto) ----------
+/// --- Inventario (agregado por producto)
+
+class Agg {
+  double exist = 0;
+  double valor = 0;
+}
+
 class InventarioScreen extends StatefulWidget {
   const InventarioScreen({super.key});
   @override
@@ -674,14 +690,13 @@ class _InventarioScreenState extends State<InventarioScreen> {
     setState(() {});
   }
 
-  Map<String, (double exist, double valor)> _agregado() {
-    final m = <String, (double, double)>{};
+  Map<String, Agg> _agregado() {
+    final m = <String, Agg>{};
     for (final l in lotes) {
-      final k = l.producto;
-      final par = m[k];
-      final ne = (par?.$1 ?? 0) + l.unidadesRestantes;
-      final nv = (par?.$2 ?? 0) + l.unidadesRestantes * l.precioUnit;
-      m[k] = (ne, nv);
+      final a = m[l.producto] ?? Agg();
+      a.exist += l.unidadesRestantes;
+      a.valor += l.unidadesRestantes * l.precioUnit;
+      m[l.producto] = a;
     }
     return m;
   }
@@ -693,19 +708,21 @@ class _InventarioScreenState extends State<InventarioScreen> {
     final rows = data.entries
         .map((e) => [
               e.key,
-              e.value.$1.toStringAsFixed(3),
-              currency.format(e.value.$2)
+              e.value.exist.toStringAsFixed(3),
+              currency.format(e.value.valor)
             ])
         .toList();
-    final total = data.values.fold<double>(0, (p, e) => p + e.$2);
+    final total =
+        data.values.fold<double>(0, (p, e) => p + e.valor);
     pdf.addPage(pw.MultiPage(build: (_) {
       return [
         pw.Header(level: 0, child: pw.Text('Inventario (PEPS)')),
         pw.Table.fromTextArray(headers: headers, data: rows),
         pw.SizedBox(height: 8),
         pw.Align(
-            alignment: pw.Alignment.centerRight,
-            child: pw.Text('Valor total: ${currency.format(total)}')),
+          alignment: pw.Alignment.centerRight,
+          child: pw.Text('Valor total: ${currency.format(total)}'),
+        ),
       ];
     }));
     final bytes = await pdf.save();
@@ -718,7 +735,7 @@ class _InventarioScreenState extends State<InventarioScreen> {
     s.appendRow(xsRow(['Producto', 'Existencia', 'Valor']));
     final data = _agregado();
     for (final e in data.entries) {
-      s.appendRow(xsRow([e.key, e.value.$1, e.value.$2]));
+      s.appendRow(xsRow([e.key, e.value.exist, e.value.valor]));
     }
     final bytes = excel.encode()!;
     final dir = await getTemporaryDirectory();
@@ -731,27 +748,7 @@ class _InventarioScreenState extends State<InventarioScreen> {
   @override
   Widget build(BuildContext context) {
     final data = _agregado();
-    final total = data.values.fold<double>(0, (p, e) => p + e.$2);
-    if (data.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Inventario (PEPS)'),
-          actions: [
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'pdf') _exportPdf();
-                if (v == 'xlsx') _exportXlsx();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'pdf', child: Text('Exportar PDF')),
-                PopupMenuItem(value: 'xlsx', child: Text('Exportar Excel')),
-              ],
-            ),
-          ],
-        ),
-        body: const Center(child: Text('Sin existencias')),
-      );
-    }
+    final total = data.values.fold<double>(0, (p, e) => p + e.valor);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Inventario (PEPS)'),
@@ -768,36 +765,39 @@ class _InventarioScreenState extends State<InventarioScreen> {
           )
         ],
       ),
-      body: ListView(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: data.isEmpty
+          ? const Center(child: Text('Sin existencias'))
+          : ListView(
               children: [
-                Text('Productos: ${data.length}'),
-                Text('Valor total: ${currency.format(total)}'),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Productos: ${data.length}'),
+                      Text('Valor total: ${currency.format(total)}'),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                ...data.entries.map((e) => ListTile(
+                      title: Text(e.key),
+                      trailing: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('Exist: ${e.value.exist.toStringAsFixed(3)}'),
+                          Text(currency.format(e.value.valor)),
+                        ],
+                      ),
+                    )),
               ],
             ),
-          ),
-          const Divider(height: 1),
-          ...data.entries.map((e) => ListTile(
-                title: Text(e.key),
-                trailing: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Exist: ${e.value.$1.toStringAsFixed(3)}'),
-                    Text(currency.format(e.value.$2)),
-                  ],
-                ),
-              )),
-        ],
-      ),
     );
   }
 }
 
-/// ---------- VENTAS ----------
+/// --- Ventas
+
 class VentasScreen extends StatefulWidget {
   const VentasScreen({super.key});
   @override
@@ -825,31 +825,29 @@ class _VentasScreenState extends State<VentasScreen> {
         await showDialog<_VentaInput>(context: context, builder: (_) => const _DlgVenta());
     if (res == null) return;
 
-    // validar stock
     final chk = await peps.hayStockParaPorciones(res.porciones);
     if (!chk.ok) {
       await showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-                title: const Text('Faltantes'),
-                content: Text(chk.faltantes.join('\n')),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Entendido'))
-                ],
-              ));
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Faltantes'),
+          content: Text(chk.faltantes.join('\n')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))
+          ],
+        ),
+      );
       return;
     }
 
-    // consumir y calcular costo
     final costoMP = await peps.consumirPorciones(res.porciones);
     final costoMO = kCostoMO * res.porciones;
     final costoGI = kCostoGI * res.porciones;
+    final hoy = dateFmt.format(DateTime.now());
 
     final v = Venta(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      fecha: dateFmt.format(DateTime.now()),
+      fecha: hoy,
       porciones: res.porciones,
       ingreso: res.ingreso,
       costoMP: costoMP,
@@ -859,25 +857,17 @@ class _VentasScreenState extends State<VentasScreen> {
     ventas.add(v);
     await store.saveVentas(ventas);
 
-    // sugerencia: ingresar a caja como Ingreso
+    // Tip: agregar ingreso a caja automáticamente
     final movs = await store.loadMovs();
     movs.add(MovimientoCaja(
         id: v.id,
-        fecha: v.fecha,
+        fecha: hoy,
         tipo: 'Ingreso',
         concepto: 'Venta ${v.porciones.toStringAsFixed(0)} porciones',
         monto: v.ingreso));
     await store.saveMovs(movs);
 
     setState(() {});
-  }
-
-  Map<String, double> _resumenPorDia() {
-    final m = <String, double>{};
-    for (final v in ventas) {
-      m[v.fecha] = (m[v.fecha] ?? 0) + v.ingreso;
-    }
-    return m;
   }
 
   Future<void> _exportPdf() async {
@@ -926,12 +916,6 @@ class _VentasScreenState extends State<VentasScreen> {
         v.ganancia
       ]));
     }
-    final res = excel['Resumen_por_dia'];
-    res.appendRow(xsRow(['Día', 'Total']));
-    _resumenPorDia().forEach((k, val) {
-      res.appendRow(xsRow([k, val]));
-    });
-
     final bytes = excel.encode()!;
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/ventas.xlsx';
@@ -987,8 +971,10 @@ class _VentasScreenState extends State<VentasScreen> {
                   title: Text('${v.fecha} · ${v.porciones.toStringAsFixed(0)} porciones'),
                   subtitle: Text(
                       'Ingreso: ${currency.format(v.ingreso)} · MP: ${currency.format(v.costoMP)} · MO: ${currency.format(v.costoMO)} · GI: ${currency.format(v.costoGI)}'),
-                  trailing:
-                      Text('Ganancia\n${currency.format(v.ganancia)}', textAlign: TextAlign.right),
+                  trailing: Text(
+                    'Ganancia\n${currency.format(v.ganancia)}',
+                    textAlign: TextAlign.right,
+                  ),
                   isThreeLine: true,
                 );
               }),
@@ -1050,7 +1036,8 @@ class _DlgVentaState extends State<_DlgVenta> {
   }
 }
 
-/// ---------- CAJA ----------
+/// --- Caja
+
 class CajaScreen extends StatefulWidget {
   const CajaScreen({super.key});
   @override
@@ -1074,10 +1061,12 @@ class _CajaScreenState extends State<CajaScreen> {
   }
 
   double get saldoTeorico {
-    final ing =
-        movs.where((m) => m.tipo == 'Ingreso').fold<double>(0, (p, m) => p + m.monto);
-    final egr =
-        movs.where((m) => m.tipo == 'Egreso').fold<double>(0, (p, m) => p + m.monto);
+    final ing = movs
+        .where((m) => m.tipo == 'Ingreso')
+        .fold<double>(0, (p, m) => p + m.monto);
+    final egr = movs
+        .where((m) => m.tipo == 'Egreso')
+        .fold<double>(0, (p, m) => p + m.monto);
     return ing - egr;
   }
 
@@ -1085,8 +1074,8 @@ class _CajaScreenState extends State<CajaScreen> {
       arqueos.isEmpty ? null : (arqueos..sort((a, b) => b.fecha.compareTo(a.fecha))).first.total;
 
   Future<void> _addMov() async {
-    final res = await showDialog<MovimientoCaja>(
-        context: context, builder: (_) => const _DlgMovCaja());
+    final res =
+        await showDialog<MovimientoCaja>(context: context, builder: (_) => const _DlgMovCaja());
     if (res != null) {
       movs.add(res);
       await store.saveMovs(movs);
@@ -1095,8 +1084,8 @@ class _CajaScreenState extends State<CajaScreen> {
   }
 
   Future<void> _addArqueo() async {
-    final res = await showDialog<ArqueoCaja>(
-        context: context, builder: (_) => const _DlgArqueo());
+    final res =
+        await showDialog<ArqueoCaja>(context: context, builder: (_) => const _DlgArqueo());
     if (res != null) {
       arqueos.add(res);
       await store.saveArqueos(arqueos);
@@ -1226,22 +1215,22 @@ class _CajaScreenState extends State<CajaScreen> {
                       final m = movs[i];
                       return ListTile(
                         leading: Icon(
-                            m.tipo == 'Ingreso'
-                                ? Icons.arrow_downward
-                                : Icons.arrow_upward,
-                            color: m.tipo == 'Ingreso'
-                                ? Colors.green
-                                : Colors.red),
+                          m.tipo == 'Ingreso'
+                              ? Icons.arrow_downward
+                              : Icons.arrow_upward,
+                          color: m.tipo == 'Ingreso' ? Colors.green : Colors.red,
+                        ),
                         title: Text('${m.tipo} · ${currency.format(m.monto)}'),
                         subtitle: Text('${m.concepto}\n${m.fecha}'),
                         isThreeLine: true,
                         trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () async {
-                              movs.removeAt(i);
-                              await store.saveMovs(movs);
-                              setState(() {});
-                            }),
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            movs.removeAt(i);
+                            await store.saveMovs(movs);
+                            setState(() {});
+                          },
+                        ),
                       );
                     },
                   ),
@@ -1301,12 +1290,12 @@ class _DlgMovCajaState extends State<_DlgMovCaja> {
         FilledButton(
             onPressed: () {
               final d = MovimientoCaja(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  fecha: hoy,
-                  tipo: tipo,
-                  concepto: concepto.text.trim(),
-                  monto: double.tryParse(monto.text.replaceAll(',', '.')) ??
-                      0.0);
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                fecha: hoy,
+                tipo: tipo,
+                concepto: concepto.text.trim(),
+                monto: double.tryParse(monto.text.replaceAll(',', '.')) ?? 0.0,
+              );
               Navigator.pop(context, d);
             },
             child: const Text('Guardar')),
@@ -1402,7 +1391,8 @@ class _DlgArqueoState extends State<_DlgArqueo> {
   }
 }
 
-/// ---------- COSTOS ----------
+/// --- Costos
+
 class CostosScreen extends StatefulWidget {
   const CostosScreen({super.key});
   @override
@@ -1425,9 +1415,17 @@ class _CostosScreenState extends State<CostosScreen> {
 
   Future<void> _exportPdf() async {
     final pdf = pw.Document();
-    final filtered = ventas; // si quisieras rango de fechas, aquí filtras
-    final headers = ['Fecha', 'Porciones', 'Ingreso', 'MP (PEPS)', 'MO', 'GI', 'Costo Total', 'Ganancia'];
-    final rows = filtered
+    final headers = [
+      'Fecha',
+      'Porciones',
+      'Ingreso',
+      'MP (PEPS)',
+      'MO',
+      'GI',
+      'Costo Total',
+      'Ganancia'
+    ];
+    final rows = ventas
         .map((s) => [
               s.fecha,
               s.porciones.toStringAsFixed(0),
@@ -1439,19 +1437,19 @@ class _CostosScreenState extends State<CostosScreen> {
               currency.format(s.ganancia),
             ])
         .toList();
-    final ingreso = filtered.fold<double>(0, (p, s) => p + s.ingreso);
-    final costoMP = filtered.fold<double>(0, (p, s) => p + s.costoMP);
-    final costoMO = filtered.fold<double>(0, (p, s) => p + s.costoMO);
-    final costoGI = filtered.fold<double>(0, (p, s) => p + s.costoGI);
-    final gan = filtered.fold<double>(0, (p, s) => p + s.ganancia);
+    final ingreso = ventas.fold<double>(0, (p, s) => p + s.ingreso);
+    final cmp = ventas.fold<double>(0, (p, s) => p + s.costoMP);
+    final cmo = ventas.fold<double>(0, (p, s) => p + s.costoMO);
+    final cgi = ventas.fold<double>(0, (p, s) => p + s.costoGI);
+    final gan = ventas.fold<double>(0, (p, s) => p + s.ganancia);
 
     pdf.addPage(pw.MultiPage(build: (_) {
       return [
         pw.Header(level: 0, child: pw.Text('Reporte de Costos')),
         pw.Text('Ingreso: ${currency.format(ingreso)}'),
-        pw.Text('MP (PEPS): ${currency.format(costoMP)}'),
-        pw.Text('MO: ${currency.format(costoMO)}'),
-        pw.Text('GI: ${currency.format(costoGI)}'),
+        pw.Text('MP (PEPS): ${currency.format(cmp)}'),
+        pw.Text('MO: ${currency.format(cmo)}'),
+        pw.Text('GI: ${currency.format(cgi)}'),
         pw.Text('Ganancia neta: ${currency.format(gan)}'),
         pw.SizedBox(height: 8),
         pw.Table.fromTextArray(headers: headers, data: rows),
@@ -1481,9 +1479,9 @@ class _CostosScreenState extends State<CostosScreen> {
   @override
   Widget build(BuildContext context) {
     final ingreso = ventas.fold<double>(0, (p, s) => p + s.ingreso);
-    final costoMP = ventas.fold<double>(0, (p, s) => p + s.costoMP);
-    final costoMO = ventas.fold<double>(0, (p, s) => p + s.costoMO);
-    final costoGI = ventas.fold<double>(0, (p, s) => p + s.costoGI);
+    final cmp = ventas.fold<double>(0, (p, s) => p + s.costoMP);
+    final cmo = ventas.fold<double>(0, (p, s) => p + s.costoMO);
+    final cgi = ventas.fold<double>(0, (p, s) => p + s.costoGI);
     final gan = ventas.fold<double>(0, (p, s) => p + s.ganancia);
 
     return Scaffold(
@@ -1512,9 +1510,9 @@ class _CostosScreenState extends State<CostosScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Ingreso: ${currency.format(ingreso)}'),
-                      Text('MP (PEPS): ${currency.format(costoMP)}'),
-                      Text('MO: ${currency.format(costoMO)}'),
-                      Text('GI: ${currency.format(costoGI)}'),
+                      Text('MP (PEPS): ${currency.format(cmp)}'),
+                      Text('MO: ${currency.format(cmo)}'),
+                      Text('GI: ${currency.format(cgi)}'),
                       Text('Ganancia neta: ${currency.format(gan)}',
                           style: const TextStyle(
                               fontWeight: FontWeight.bold, color: Colors.green)),
@@ -1523,7 +1521,8 @@ class _CostosScreenState extends State<CostosScreen> {
                 ),
                 const Divider(height: 1),
                 ...ventas.map((v) => ListTile(
-                      title: Text('${v.fecha} · ${v.porciones.toStringAsFixed(0)} porciones'),
+                      title: Text(
+                          '${v.fecha} · ${v.porciones.toStringAsFixed(0)} porciones'),
                       subtitle: Text(
                           'Ingreso: ${currency.format(v.ingreso)}  ·  Costo: ${currency.format(v.costoTotal)}'),
                       trailing: Text(currency.format(v.ganancia),
