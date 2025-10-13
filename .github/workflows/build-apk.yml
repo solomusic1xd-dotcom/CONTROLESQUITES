@@ -33,16 +33,49 @@ jobs:
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
+      # 👉 CREA la carpeta android si no existe
+      - name: Create Android project structure
+        working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
+        run: |
+          if [ ! -d android ]; then
+            flutter create . --platforms=android
+          fi
+
+      # 👉 Fuerza versiones seguras por si el template trae otras
+      - name: Force compileSdk/AGP/Kotlin/Gradle
+        working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}/android
+        run: |
+          # Gradle wrapper
+          mkdir -p gradle/wrapper
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip" > gradle/wrapper/gradle-wrapper.properties
+
+          # settings.gradle ya lo gestiona Flutter moderno (dev.flutter.*), no tocamos
+
+          # build.gradle raíz: AGP/Kotlin
+          sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.3.0"/' build.gradle || true
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' build.gradle || true
+
+          # app/build.gradle: compileSdk 34
+          sed -i 's/compileSdk [0-9]\+/compileSdk 34/' app/build.gradle || true
+
       - name: Pub get
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: flutter pub get
 
       - name: Build debug APK
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
-        run: flutter build apk --debug
+        run: flutter build apk --debug --verbose
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
           path: ${{ env.FLUTTER_PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
+
+      # (Opcional) Sube la carpeta android generada para inspección
+      - name: Upload generated android folder
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-tree
+          path: ${{ env.FLUTTER_PROJECT_DIR }}/android
