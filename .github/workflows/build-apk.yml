@@ -6,7 +6,8 @@ on:
     tags: ['v*.*.*']
 
 env:
-  FLUTTER_PROJECT_DIR: coop_control_app_reports   # <- carpeta de tu app Flutter
+  # ⚠️ Carpeta donde está tu pubspec.yaml y lib/
+  FLUTTER_PROJECT_DIR: coop_control_app_reports
 
 jobs:
   build:
@@ -22,7 +23,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # SDK de Android (incluye sdkmanager en el PATH)
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -32,33 +32,49 @@ jobs:
           channel: stable
           cache: true
 
-      # Acepta licencias e instala plataformas y build-tools
       - name: Install Android packages
         run: |
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
-      # Crea android/ si no existe (cuando el repo no la tiene)
-      - name: Create Android project structure
+      # 👇 NUEVO: asegura que estamos en la carpeta correcta y crea android/ si no existe
+      - name: Ensure android folder exists
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: |
-          if [ ! -d android ]; then
+          echo "PWD = $(pwd)"
+          echo "Contenido:"
+          ls -la
+          if [ ! -f "pubspec.yaml" ]; then
+            echo "❌ No se encontró pubspec.yaml aquí. Revisa FLUTTER_PROJECT_DIR."
+            exit 1
+          fi
+
+          if [ ! -d "android" ]; then
+            echo "No hay carpeta android/. Generando..."
             flutter create . --platforms=android
           fi
 
-      # Parchea Gradle/Kotlin/AndroidX/multidex/compileSdk/minSdk/targetSdk/namespace
-      - name: Patch Android gradle files
+          echo "Árbol de android/:"
+          ls -la android || true
+          test -f android/app/build.gradle || (echo "❌ Falta android/app/build.gradle"; exit 1)
+          test -f android/build.gradle      || (echo "❌ Falta android/build.gradle"; exit 1)
+
+      - name: Patch Android gradle files (safe)
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}/android
         run: |
-          # gradle-wrapper (8.6 es estable con AGP 8.3.x)
+          # Gradle 8.6 (compatible con AGP 8.3.x)
           mkdir -p gradle/wrapper
           echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip" > gradle/wrapper/gradle-wrapper.properties
 
-          # build.gradle (root): fija versiones de plugins
-          sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.3.0"/' build.gradle || true
-          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' build.gradle || true
+          # build.gradle (root): fija versiones de plugins, si existen
+          if grep -q 'id "com.android.application"' build.gradle; then
+            sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.3.0"/' build.gradle || true
+          fi
+          if grep -q 'id "org.jetbrains.kotlin.android"' build.gradle; then
+            sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' build.gradle || true
+          fi
 
-          # gradle.properties: AndroidX + Jetifier + memoria
+          # gradle.properties: AndroidX + Jetifier
           cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx2g
           android.useAndroidX=true
@@ -66,46 +82,36 @@ jobs:
           kotlin.code.style=official
           EOF
 
-          # app/build.gradle: fuerza compileSdk/minSdk/targetSdk/namespace y multidex
-          # (funciona tanto con plantillas nuevas como viejas)
-          # Si existe "namespace" lo mantenemos, si no, lo añadimos.
-          if ! grep -q "namespace " app/build.gradle; then
-            sed -i 's/android {/android {\n    namespace "com.controlesquites.app"/' app/build.gradle
+          # app/build.gradle: fuerza SDKs y multidex (soporta plantillas viejas/nuevas)
+          if [ -f app/build.gradle ]; then
+            # namespace
+            if grep -q "^ *namespace " app/build.gradle; then
+              sed -i 's/^ *namespace .*/    namespace "com.controlesquites.app"/' app/build.gradle
+            else
+              sed -i '0,/android *{/{s//android {\n    namespace "com.controlesquites.app"/}' app/build.gradle
+            fi
+            # compileSdk
+            sed -i 's/compileSdkVersion *[0-9]\+/compileSdkVersion 34/' app/build.gradle || true
+            sed -i 's/compileSdk *[0-9]\+/compileSdk 34/' app/build.gradle || true
+            # min/target
+            sed -i 's/minSdkVersion *[0-9]\+/minSdkVersion 21/' app/build.gradle || true
+            sed -i 's/minSdk *[0-9]\+/minSdk 21/' app/build.gradle || true
+            sed -i 's/targetSdkVersion *[0-9]\+/targetSdkVersion 34/' app/build.gradle || true
+            sed -i 's/targetSdk *[0-9]\+/targetSdk 34/' app/build.gradle || true
+            # multidex
+            grep -q "multiDexEnabled true" app/build.gradle || sed -i 's/defaultConfig {/defaultConfig {\n        multiDexEnabled true/' app/build.gradle
+            grep -q "androidx.multidex:multidex" app/build.gradle || sed -i 's/dependencies {/dependencies {\n    implementation "androidx.multidex:multidex:2.0.1"/' app/build.gradle
+            # applicationId (solo si no existía)
+            grep -q 'applicationId "' app/build.gradle || sed -i 's/defaultConfig {/defaultConfig {\n        applicationId "com.controlesquites.app"/' app/build.gradle
           else
-            sed -i 's/namespace .*/namespace "com.controlesquites.app"/' app/build.gradle
-          fi
-
-          # compileSdk (soporta "compileSdk 34" o "compileSdkVersion 34")
-          sed -i 's/compileSdkVersion *[0-9]\+/compileSdkVersion 34/' app/build.gradle || true
-          sed -i 's/compileSdk *[0-9]\+/compileSdk 34/' app/build.gradle || true
-
-          # min/targetSdk dentro de defaultConfig
-          sed -i 's/minSdkVersion *[0-9]\+/minSdkVersion 21/' app/build.gradle || true
-          sed -i 's/minSdk *[0-9]\+/minSdk 21/' app/build.gradle || true
-          sed -i 's/targetSdkVersion *[0-9]\+/targetSdkVersion 34/' app/build.gradle || true
-          sed -i 's/targetSdk *[0-9]\+/targetSdk 34/' app/build.gradle || true
-
-          # multidex
-          if ! grep -q "multiDexEnabled true" app/build.gradle; then
-            sed -i 's/defaultConfig {/defaultConfig {\n        multiDexEnabled true/' app/build.gradle
-          fi
-          if ! grep -q "androidx.multidex:multidex" app/build.gradle; then
-            sed -i 's/dependencies {/dependencies {\n    implementation "androidx.multidex:multidex:2.0.1"/' app/build.gradle
-          fi
-
-          # AndroidManifest: applicationId si hiciera falta (normalmente no)
-          if grep -q 'applicationId ' app/build.gradle; then
-            sed -i 's/applicationId ".*"/applicationId "com.controlesquites.app"/' app/build.gradle
-          else
-            sed -i 's/defaultConfig {/defaultConfig {\n        applicationId "com.controlesquites.app"/' app/build.gradle
+            echo "❌ No existe app/build.gradle"; exit 1
           fi
 
       - name: flutter pub get
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: flutter pub get
 
-      # Construye sin shrink para evitar problemas de R8 en debug
-      - name: Build debug APK
+      - name: Build debug APK (no shrink)
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: flutter build apk --debug --no-shrink --verbose
 
@@ -115,7 +121,7 @@ jobs:
           name: app-debug
           path: ${{ env.FLUTTER_PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
 
-      - name: Upload generated android folder (optional)
+      - name: Upload android tree (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
