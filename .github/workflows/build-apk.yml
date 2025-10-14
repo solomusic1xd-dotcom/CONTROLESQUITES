@@ -6,7 +6,7 @@ on:
     tags: ['v*.*.*']
 
 env:
-  # ⚠️ Carpeta donde está tu pubspec.yaml y lib/
+  # Carpeta que contiene pubspec.yaml y lib/
   FLUTTER_PROJECT_DIR: coop_control_app_reports
 
 jobs:
@@ -37,44 +37,43 @@ jobs:
           yes | sdkmanager --licenses
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
-      # 👇 NUEVO: asegura que estamos en la carpeta correcta y crea android/ si no existe
+      # Asegura carpeta correcta y crea android/ cuando falta
       - name: Ensure android folder exists
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: |
           echo "PWD = $(pwd)"
-          echo "Contenido:"
           ls -la
           if [ ! -f "pubspec.yaml" ]; then
-            echo "❌ No se encontró pubspec.yaml aquí. Revisa FLUTTER_PROJECT_DIR."
+            echo "❌ Falta pubspec.yaml en $PWD"
             exit 1
           fi
 
           if [ ! -d "android" ]; then
-            echo "No hay carpeta android/. Generando..."
+            echo "Generación de carpeta android/…"
             flutter create . --platforms=android
           fi
 
           echo "Árbol de android/:"
           ls -la android || true
-          test -f android/app/build.gradle || (echo "❌ Falta android/app/build.gradle"; exit 1)
-          test -f android/build.gradle      || (echo "❌ Falta android/build.gradle"; exit 1)
+
+          # Valida presencia de archivos .gradle o .gradle.kts
+          test -f android/app/build.gradle -o -f android/app/build.gradle.kts \
+            || (echo "❌ Falta android/app/build.gradle(.kts)"; exit 1)
+          test -f android/build.gradle -o -f android/build.gradle.kts \
+            || (echo "❌ Falta android/build.gradle(.kts)"; exit 1)
 
       - name: Patch Android gradle files (safe)
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}/android
         run: |
-          # Gradle 8.6 (compatible con AGP 8.3.x)
+          set -e
+
+          # Wrapper Gradle 8.6 (válido para AGP modernos)
           mkdir -p gradle/wrapper
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip" > gradle/wrapper/gradle-wrapper.properties
+          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
+          EOF
 
-          # build.gradle (root): fija versiones de plugins, si existen
-          if grep -q 'id "com.android.application"' build.gradle; then
-            sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.3.0"/' build.gradle || true
-          fi
-          if grep -q 'id "org.jetbrains.kotlin.android"' build.gradle; then
-            sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.22"/' build.gradle || true
-          fi
-
-          # gradle.properties: AndroidX + Jetifier
+          # gradle.properties
           cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx2g
           android.useAndroidX=true
@@ -82,29 +81,65 @@ jobs:
           kotlin.code.style=official
           EOF
 
-          # app/build.gradle: fuerza SDKs y multidex (soporta plantillas viejas/nuevas)
-          if [ -f app/build.gradle ]; then
+          # Detecta dialecto (Groovy vs Kotlin DSL) para app/
+          APP_GRADLE="app/build.gradle"
+          DSL="groovy"
+          if [ -f "app/build.gradle.kts" ]; then
+            APP_GRADLE="app/build.gradle.kts"
+            DSL="kts"
+          fi
+
+          echo "Archivo de la app: $APP_GRADLE (DSL=$DSL)"
+
+          if [ "$DSL" = "kts" ]; then
+            # --- Kotlin DSL (.kts) ---
+
             # namespace
-            if grep -q "^ *namespace " app/build.gradle; then
-              sed -i 's/^ *namespace .*/    namespace "com.controlesquites.app"/' app/build.gradle
+            if grep -q '^[[:space:]]*namespace[[:space:]]*=' "$APP_GRADLE"; then
+              sed -i 's/^[[:space:]]*namespace[[:space:]]*=.*/    namespace = "com.controlesquites.app"/' "$APP_GRADLE"
             else
-              sed -i '0,/android *{/{s//android {\n    namespace "com.controlesquites.app"/}' app/build.gradle
+              sed -i '0,/android *\{/{s//android {\n    namespace = "com.controlesquites.app"/}' "$APP_GRADLE"
             fi
-            # compileSdk
-            sed -i 's/compileSdkVersion *[0-9]\+/compileSdkVersion 34/' app/build.gradle || true
-            sed -i 's/compileSdk *[0-9]\+/compileSdk 34/' app/build.gradle || true
-            # min/target
-            sed -i 's/minSdkVersion *[0-9]\+/minSdkVersion 21/' app/build.gradle || true
-            sed -i 's/minSdk *[0-9]\+/minSdk 21/' app/build.gradle || true
-            sed -i 's/targetSdkVersion *[0-9]\+/targetSdkVersion 34/' app/build.gradle || true
-            sed -i 's/targetSdk *[0-9]\+/targetSdk 34/' app/build.gradle || true
-            # multidex
-            grep -q "multiDexEnabled true" app/build.gradle || sed -i 's/defaultConfig {/defaultConfig {\n        multiDexEnabled true/' app/build.gradle
-            grep -q "androidx.multidex:multidex" app/build.gradle || sed -i 's/dependencies {/dependencies {\n    implementation "androidx.multidex:multidex:2.0.1"/' app/build.gradle
-            # applicationId (solo si no existía)
-            grep -q 'applicationId "' app/build.gradle || sed -i 's/defaultConfig {/defaultConfig {\n        applicationId "com.controlesquites.app"/' app/build.gradle
+
+            # compileSdk, minSdk, targetSdk
+            sed -i -E 's/compileSdk( *[=:])* *[0-9]+/compileSdk = 34/' "$APP_GRADLE" || true
+            sed -i -E 's/minSdk( *[=:])* *[0-9]+/minSdk = 21/' "$APP_GRADLE" || true
+            sed -i -E 's/targetSdk( *[=:])* *[0-9]+/targetSdk = 34/' "$APP_GRADLE" || true
+
+            # defaultConfig: applicationId y multidex
+            if ! grep -q 'applicationId[[:space:]]*=' "$APP_GRADLE"; then
+              sed -i 's/defaultConfig *{/[&\n        applicationId = "com.controlesquites.app"/' "$APP_GRADLE"
+            fi
+            if ! grep -q 'multiDexEnabled[[:space:]]*=' "$APP_GRADLE"; then
+              sed -i 's/defaultConfig *{/[&\n        multiDexEnabled = true/' "$APP_GRADLE"
+            fi
+
+            # dependencia multidex
+            grep -q 'androidx.multidex:multidex' "$APP_GRADLE" \
+              || sed -i 's/dependencies *{/dependencies {\n    implementation("androidx.multidex:multidex:2.0.1")/' "$APP_GRADLE"
+
           else
-            echo "❌ No existe app/build.gradle"; exit 1
+            # --- Groovy (.gradle) ---
+
+            # namespace
+            if grep -q '^[[:space:]]*namespace ' "$APP_GRADLE"; then
+              sed -i 's/^[[:space:]]*namespace .*/    namespace "com.controlesquites.app"/' "$APP_GRADLE"
+            else
+              sed -i '0,/android *{/{s//android {\n    namespace "com.controlesquites.app"/}' "$APP_GRADLE"
+            fi
+
+            # compileSdk, minSdk, targetSdk
+            sed -i 's/compileSdkVersion *[0-9]\+/compileSdkVersion 34/' "$APP_GRADLE" || true
+            sed -i 's/compileSdk *[0-9]\+/compileSdk 34/' "$APP_GRADLE" || true
+            sed -i 's/minSdkVersion *[0-9]\+/minSdkVersion 21/' "$APP_GRADLE" || true
+            sed -i 's/minSdk *[0-9]\+/minSdk 21/' "$APP_GRADLE" || true
+            sed -i 's/targetSdkVersion *[0-9]\+/targetSdkVersion 34/' "$APP_GRADLE" || true
+            sed -i 's/targetSdk *[0-9]\+/targetSdk 34/' "$APP_GRADLE" || true
+
+            # multidex + applicationId
+            grep -q "multiDexEnabled" "$APP_GRADLE" || sed -i 's/defaultConfig {/defaultConfig {\n        multiDexEnabled true/' "$APP_GRADLE"
+            grep -q 'applicationId "' "$APP_GRADLE" || sed -i 's/defaultConfig {/defaultConfig {\n        applicationId "com.controlesquites.app"/' "$APP_GRADLE"
+            grep -q "androidx.multidex:multidex" "$APP_GRADLE" || sed -i 's/dependencies {/dependencies {\n    implementation "androidx.multidex:multidex:2.0.1"/' "$APP_GRADLE"
           fi
 
       - name: flutter pub get
