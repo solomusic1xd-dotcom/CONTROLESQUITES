@@ -34,33 +34,28 @@ jobs:
       - name: Install Android packages
         run: |
           yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          sdkmanager "platform-tools" \
+                     "platforms;android-35" "build-tools;35.0.0" \
+                     "platforms;android-34" "build-tools;34.0.0"
 
       - name: Ensure android folder exists
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}
         run: |
-          echo "PWD=$(pwd)"; ls -la
-          if [ ! -f "pubspec.yaml" ]; then
-            echo "❌ Falta pubspec.yaml en este directorio"; exit 1; fi
-          if [ ! -d "android" ]; then
-            echo "Generando android/…"; flutter create . --platforms=android; fi
-          ls -la android || true
-          test -f android/app/build.gradle -o -f android/app/build.gradle.kts \
-            || (echo "❌ Falta android/app/build.gradle(.kts)"; exit 1)
-          test -f android/build.gradle -o -f android/build.gradle.kts \
-            || (echo "❌ Falta android/build.gradle(.kts)"; exit 1)
+          ls -la
+          test -f pubspec.yaml || { echo "Falta pubspec.yaml"; exit 1; }
+          [ -d android ] || flutter create . --platforms=android
+          test -f android/app/build.gradle -o -f android/app/build.gradle.kts || { echo "Falta app/build.gradle(.kts)"; exit 1; }
+          test -f android/build.gradle -o -f android/build.gradle.kts || { echo "Falta build.gradle(.kts)"; exit 1; }
 
-      - name: Align Gradle wrapper + basics
+      - name: Align Gradle and SDK levels
         working-directory: ./${{ env.FLUTTER_PROJECT_DIR }}/android
         run: |
           set -e
-          # Wrapper: Gradle 8.7 para AGP recientes
           mkdir -p gradle/wrapper
           cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
           distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
           EOF
 
-          # Propiedades: AndroidX/Jetifier y memoria
           cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx2g
           android.useAndroidX=true
@@ -68,14 +63,29 @@ jobs:
           kotlin.code.style=official
           EOF
 
-          # Subir minSdk a 21 en Groovy o Kotlin DSL (sin tocar otras claves)
           APP=app/build.gradle; DSL=groovy
           if [ -f "app/build.gradle.kts" ]; then APP=app/build.gradle.kts; DSL=kts; fi
+          echo "Parche en $APP (DSL=$DSL)"
+
           if [ "$DSL" = "kts" ]; then
+            # Kotlin DSL
+            sed -i -E 's/compileSdk( *[=:])* *[0-9]+/compileSdk = 35/' "$APP" || true
+            sed -i -E 's/targetSdk( *[=:])* *[0-9]+/targetSdk = 35/' "$APP" || true
             sed -i -E 's/minSdk( *[=:])* *[0-9]+/minSdk = 21/' "$APP" || true
+            if ! grep -q 'namespace[[:space:]]*=' "$APP"; then
+              sed -i '0,/android *\{/{s//android {\n    namespace = "com.controlesquites.app"/}' "$APP"
+            fi
           else
+            # Groovy
+            sed -i -E 's/compileSdkVersion *[0-9]+/compileSdkVersion 35/' "$APP" || true
+            sed -i -E 's/compileSdk *[0-9]+/compileSdk 35/' "$APP" || true
+            sed -i -E 's/targetSdkVersion *[0-9]+/targetSdkVersion 35/' "$APP" || true
+            sed -i -E 's/targetSdk *[0-9]+/targetSdk 35/' "$APP" || true
             sed -i -E 's/minSdkVersion *[0-9]+/minSdkVersion 21/' "$APP" || true
             sed -i -E 's/minSdk *[0-9]+/minSdk 21/' "$APP" || true
+            if ! grep -q '^[[:space:]]*namespace ' "$APP"; then
+              sed -i '0,/android *{/{s//android {\n    namespace "com.controlesquites.app"/}' "$APP"
+            fi
           fi
 
       - name: flutter pub get
